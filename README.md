@@ -48,7 +48,7 @@ NEITHER THE CREATORS OF THIS PROJECT NOR THE CONTRIBUTORS MAY BE HELD LIABLE FOR
 Copyright (C) 2023 Enes Sadık Özbek and Contributors.
 
 Most of this project's code is, unless otherwise specified, licensed under the GNU GPL v3 license.  
-See the [LICENSE](https://github.com/Trojaner/DiscordFS/blob/master/LICENSE) file for more information.
+See the [LICENSE](https://github.com/Trojaner/DiscordFS/blob/main/LICENSE) file for more information.
 
 ## Acknowledgements
 - [cfapiSync](https://github.dev/styletronix/cfapiSync) by [styletronix](https://github.com/styletronix) ([www.styletronix.net](www.styletronix.net)) for providing an example Windows CF API integration
