@@ -1,5 +1,5 @@
 # DiscordFS
-Use Discord as your personal storage cloud
+Use Discord as your personal free cloud storage
 
 <img align="right" width="auto" height="300" src="https://user-images.githubusercontent.com/1809172/225082445-b201e99b-2eff-4426-ba00-7e3c633c36ad.png">
 
