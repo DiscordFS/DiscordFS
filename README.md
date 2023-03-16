@@ -72,5 +72,5 @@ Most of this project's code is, unless otherwise specified, licensed under the G
 See the [LICENSE](https://github.com/Trojaner/DiscordFS/blob/main/LICENSE) file for more information.
 
 ## Acknowledgements
-- [cfapiSync](https://github.dev/styletronix/cfapiSync) by [styletronix](https://github.com/styletronix) ([www.styletronix.net](www.styletronix.net)) for providing an example Windows CF API integration
+- [cfapiSync](https://github.com/styletronix/cfapiSync) by [styletronix](https://github.com/styletronix) ([www.styletronix.net](www.styletronix.net)) for providing an example Windows CF API integration
 - Projects such as [discord-fs by pixelomer](https://github.com/pixelomer/discord-fs) and [discord-fs by fr34kyn01535](https://github.com/fr34kyn01535/discord-fs) for inspiring the project idea
