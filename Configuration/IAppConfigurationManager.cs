@@ -37,7 +37,8 @@ public class AppConfigurationManager : IAppConfigurationManager
             .Build();
 
         var yaml = await File.ReadAllTextAsync(_configPath);
-        return _appConfiguration = deserializer.Deserialize<AppConfiguration>(yaml);
+        _appConfiguration = deserializer.Deserialize<AppConfiguration>(yaml) ?? GetDefaultConfiguration();
+        return _appConfiguration;
     }
 
     public async Task WriteConfigurationAsync()

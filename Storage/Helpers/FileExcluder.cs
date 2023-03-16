@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace DiscordFS.Storage.Helpers;
 
@@ -33,9 +34,17 @@ public static class FileExcluder
     {
         foreach (var pattern in FileExclusionPatterns)
         {
-            if (Regex.IsMatch(relativeOrFullPath, pattern, RegexOptions.IgnoreCase))
+            try
             {
-                return true;
+                if (Regex.IsMatch(relativeOrFullPath, pattern, RegexOptions.IgnoreCase))
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debugger.Break();
+                throw;
             }
         }
 

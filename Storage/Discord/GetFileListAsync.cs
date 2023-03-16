@@ -9,16 +9,16 @@ namespace DiscordFS.Storage.Discord;
 
 public class GetFileListAsync : IFileListAsync
 {
-    private readonly IRemoteFileProvider _provider;
+    private readonly IRemoteFileSystemProvider _systemProvider;
     private readonly CancellationTokenSource _ctx;
     private readonly BlockingCollection<FilePlaceholder> _infoList;
     private readonly FileOperationResult _finalStatus;
 
     public bool IsOpen { get; protected set; }
 
-    public GetFileListAsync(IRemoteFileProvider provider)
+    public GetFileListAsync(IRemoteFileSystemProvider systemProvider)
     {
-        _provider = provider;
+        _systemProvider = systemProvider;
         _ctx = new CancellationTokenSource();
         _infoList = new BlockingCollection<FilePlaceholder>();
         _finalStatus = new FileOperationResult();
@@ -66,7 +66,7 @@ public class GetFileListAsync : IFileListAsync
 
             try
             {
-                if (_provider.Status != FileProviderStatus.Ready)
+                if (_systemProvider.Status != FileProviderStatus.Ready)
                 {
                     return new GetNextFileResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE);
                 }
@@ -105,14 +105,14 @@ public class GetFileListAsync : IFileListAsync
             throw new InvalidOperationException(message: "Already open");
         }
 
-        if (_provider.Status != FileProviderStatus.Ready)
+        if (_systemProvider.Status != FileProviderStatus.Ready)
         {
             return Task.FromResult(new FileOperationResult(CloudFileFetchErrorCode.Offline));
         }
 
         IsOpen = true;
 
-        var fullPath = PathHelper.GetAbsolutePath(relativeFileName, _provider.Options.LocalPath);
+        var fullPath = PathHelper.GetAbsolutePath(relativeFileName, _systemProvider.Options.LocalPath);
         cancellationToken.Register(_ctx.Cancel);
         var tctx = _ctx.Token;
 
@@ -195,16 +195,16 @@ public class GetFileListAsync : IFileListAsync
 public class WriteFileAsync : IWriteFileAsync
 {
     private OpenAsyncParams _params;
-    private readonly IRemoteFileProvider _provider;
+    private readonly IRemoteFileSystemProvider _systemProvider;
     private FileStream _fileStream;
     private string _fullPath;
     private string _tempFile;
 
     public bool IsOpen { get; protected set; }
 
-    public WriteFileAsync(IRemoteFileProvider provider)
+    public WriteFileAsync(IRemoteFileSystemProvider systemProvider)
     {
-        _provider = provider;
+        _systemProvider = systemProvider;
     }
 
     public UploadMode SupportedUploadModes
@@ -228,7 +228,7 @@ public class WriteFileAsync : IWriteFileAsync
             throw new InvalidOperationException(message: "Already open");
         }
 
-        if (_provider.Status != FileProviderStatus.Ready)
+        if (_systemProvider.Status != FileProviderStatus.Ready)
         {
             return Task.FromResult(new WriteFileOpenResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE));
         }
@@ -245,7 +245,7 @@ public class WriteFileAsync : IWriteFileAsync
 
         try
         {
-            _fullPath = PathHelper.GetAbsolutePath(_params.RelativeFileName, _provider.Options.LocalPath);
+            _fullPath = PathHelper.GetAbsolutePath(_params.RelativeFileName, _systemProvider.Options.LocalPath);
 
             if (!Directory.Exists(Path.GetDirectoryName(_fullPath)))
             {

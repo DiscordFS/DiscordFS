@@ -31,7 +31,7 @@ public class SynchronizationHandler : IDisposable
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _fetchPlaceholdersCancellationTokens;
     private readonly ConcurrentDictionary<string, FailedDataSynchronization> _failedDataQueue;
 
-    private readonly IRemoteFileProvider _fileProvider;
+    private readonly IRemoteFileSystemProvider _fileSystemProvider;
     private readonly FileRangeManager _fileRangeManager;
     private readonly LockableQueue<string> _localChangedDataQueue;
     private readonly LockableQueue<string> _remoteChangedDataQueue;
@@ -52,11 +52,11 @@ public class SynchronizationHandler : IDisposable
 
     public SynchronizationHandler(
         FileRangeManager fileRangeManager,
-        IRemoteFileProvider fileProvider,
+        IRemoteFileSystemProvider fileSystemProvider,
         StorageProviderOptions options,
         ILogger logger)
     {
-        _fileProvider = fileProvider;
+        _fileSystemProvider = fileSystemProvider;
         _options = options;
         _logger = logger;
         _fileRangeManager = fileRangeManager;
@@ -65,7 +65,7 @@ public class SynchronizationHandler : IDisposable
 
         _remoteChangedDataQueue = new LockableQueue<string>();
         _localChangedDataQueue = new LockableQueue<string>();
-        _fileProvider.StateChange += OnFileProviderStateChange;
+        _fileSystemProvider.StateChange += OnFileSystemProviderStateChange;
 
         _callbackMappings = new[]
         {
@@ -128,10 +128,11 @@ public class SynchronizationHandler : IDisposable
         _localSyncTimer = new Timer(LocalSyncTimerCallback, state: null, Timeout.Infinite, Timeout.Infinite);
 
         _syncActionBlock = new ActionBlock<SyncDataParam>(SyncAction);
-        _changedDataQueue = new ActionBlock<ProcessChangedDataArgs>(ChangedDataAction);
+        _changedDataQueue =
+            new ActionBlock<ProcessChangedDataArgs>(ChangedDataAction, new ExecutionDataflowBlockOptions { MaxDegreeOfParallelism = 1 });
     }
 
-    public void OnFileProviderStateChange(object sender, FileProviderStateChangedEventArgs e)
+    public void OnFileSystemProviderStateChange(object sender, FileProviderStateChangedEventArgs e)
     {
         if (e.Status == FileProviderStatus.Ready)
         {
@@ -153,7 +154,7 @@ public class SynchronizationHandler : IDisposable
     private async Task ProcessChangedDataAsync2(
         string fullPath,
         ExtendedPlaceholderState localPlaceHolder,
-        DynamicServerPlaceholder remotePlaceholder,
+        DynamicServerPlaceholder dynamicRemotePlaceHolder,
         SyncMode syncMode,
         CancellationToken ctx)
     {
@@ -178,7 +179,6 @@ public class SynchronizationHandler : IDisposable
                 localPlaceHolder.SetPinState(CF_PIN_STATE.CF_PIN_STATE_INHERIT);
             }
 
-
             if (localPlaceHolder.PlaceholderInfoStandard.PinState == CF_PIN_STATE.CF_PIN_STATE_EXCLUDED)
             {
                 return;
@@ -188,7 +188,7 @@ public class SynchronizationHandler : IDisposable
             {
                 if (syncMode == SyncMode.Full)
                 {
-                    if ((await remotePlaceholder.GetPlaceholder()) == null)
+                    if ((await dynamicRemotePlaceHolder.GetPlaceholderAsync()) == null)
                     {
                         // Directory does not exist on Server
                         if (localPlaceHolder.PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_IN_SYNC))
@@ -198,7 +198,7 @@ public class SynchronizationHandler : IDisposable
                         }
 
                         // File locally created or modified while deleted on Server
-                        var creatResult = await _fileProvider.CreateFileAsync(relativePath, isDirectory: true);
+                        var creatResult = await _fileSystemProvider.Operations.CreateFileAsync(relativePath, isDirectory: true);
                         creatResult.ThrowOnFailure();
 
                         localPlaceHolder.UpdatePlaceholder(creatResult.FilePlaceholder, CF_UPDATE_FLAGS.CF_UPDATE_FLAG_MARK_IN_SYNC)
@@ -211,7 +211,7 @@ public class SynchronizationHandler : IDisposable
                 // Compare with remote file if Full Sync
                 if (syncMode == SyncMode.Full)
                 {
-                    if ((await remotePlaceholder.GetPlaceholder()) == null)
+                    if ((await dynamicRemotePlaceHolder.GetPlaceholderAsync()) == null)
 
                         // New local file or remote deleted File
                     {
@@ -224,13 +224,13 @@ public class SynchronizationHandler : IDisposable
                         }
 
                         // File locally created or modified while deleted on Server
-                        var uploadFileToServerResult = await _fileProvider.UploadFileToServerAsync(fullPath, ctx);
+                        var uploadFileToServerResult = await _fileSystemProvider.UploadFileAsync(fullPath, ctx);
                         uploadFileToServerResult.ThrowOnFailure();
                         return;
                     }
 
                     // Validate ETag
-                    ValidateETag(localPlaceHolder, (await remotePlaceholder.GetPlaceholder()));
+                    ValidateETag(localPlaceHolder, (await dynamicRemotePlaceHolder.GetPlaceholderAsync()));
                 }
 
                 // local file full populated and out of sync
@@ -238,10 +238,10 @@ public class SynchronizationHandler : IDisposable
                     !localPlaceHolder.PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PARTIAL))
                 {
                     // Local File changed: Upload to Server
-                    if (await remotePlaceholder.GetPlaceholder() == null
-                        || (localPlaceHolder.LastWriteTime > (await remotePlaceholder.GetPlaceholder()).LastWriteTime))
+                    var remotePlaceHolder = await dynamicRemotePlaceHolder.GetPlaceholderAsync();
+                    if (remotePlaceHolder == null || (localPlaceHolder.LastWriteTime > remotePlaceHolder.LastWriteTime))
                     {
-                        await _fileProvider.UploadFileToServerAsync(fullPath, ctx);
+                        await _fileSystemProvider.UploadFileAsync(fullPath, ctx);
                         localPlaceHolder.Reload();
                     }
                     else
@@ -249,7 +249,7 @@ public class SynchronizationHandler : IDisposable
                         // Local File requires update...
                         if (localPlaceHolder.PlaceholderInfoStandard.PinState == CF_PIN_STATE.CF_PIN_STATE_PINNED)
                         {
-                            HydratePlaceholder(localPlaceHolder, await remotePlaceholder.GetPlaceholder());
+                            HydratePlaceholder(localPlaceHolder, await dynamicRemotePlaceHolder.GetPlaceholderAsync());
                             return;
                         }
 
@@ -259,7 +259,7 @@ public class SynchronizationHandler : IDisposable
                             await CreatePreviousVersionAsync(fullPath, ctx);
                         }
 
-                        localPlaceHolder.UpdatePlaceholder(await remotePlaceholder.GetPlaceholder(),
+                        localPlaceHolder.UpdatePlaceholder(await dynamicRemotePlaceHolder.GetPlaceholderAsync(),
                                 CF_UPDATE_FLAGS.CF_UPDATE_FLAG_MARK_IN_SYNC | CF_UPDATE_FLAGS.CF_UPDATE_FLAG_DEHYDRATE)
                             .ThrowOnFailure();
 
@@ -270,7 +270,7 @@ public class SynchronizationHandler : IDisposable
                 // Dehydration requested
                 if (localPlaceHolder.PlaceholderInfoStandard.PinState == CF_PIN_STATE.CF_PIN_STATE_UNPINNED)
                 {
-                    await DehydratePlaceholderAsync(localPlaceHolder, await remotePlaceholder.GetPlaceholder(), ctx);
+                    await DehydratePlaceholderAsync(localPlaceHolder, await dynamicRemotePlaceHolder.GetPlaceholderAsync(), ctx);
                     return;
                 }
 
@@ -278,7 +278,7 @@ public class SynchronizationHandler : IDisposable
                 if (localPlaceHolder.PlaceholderInfoStandard.PinState == CF_PIN_STATE.CF_PIN_STATE_PINNED
                     && localPlaceHolder.PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PARTIAL))
                 {
-                    HydratePlaceholder(localPlaceHolder, await remotePlaceholder.GetPlaceholder());
+                    HydratePlaceholder(localPlaceHolder, await dynamicRemotePlaceHolder.GetPlaceholderAsync());
                     return;
                 }
 
@@ -286,7 +286,7 @@ public class SynchronizationHandler : IDisposable
                 if (localPlaceHolder.PlaceholderInfoStandard.InSyncState == CF_IN_SYNC_STATE.CF_IN_SYNC_STATE_NOT_IN_SYNC &&
                     localPlaceHolder.PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PARTIAL))
                 {
-                    localPlaceHolder.UpdatePlaceholder(await remotePlaceholder.GetPlaceholder(),
+                    localPlaceHolder.UpdatePlaceholder(await dynamicRemotePlaceHolder.GetPlaceholderAsync(),
                             CF_UPDATE_FLAGS.CF_UPDATE_FLAG_DEHYDRATE | CF_UPDATE_FLAGS.CF_UPDATE_FLAG_MARK_IN_SYNC)
                         .ThrowOnFailure();
 
@@ -396,7 +396,7 @@ public class SynchronizationHandler : IDisposable
                 if (!localPlaceHolder.PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PARTIAL))
                 {
                     // Upload if local file is fully available
-                    await _fileProvider.UploadFileToServerAsync(localPlaceHolder.FullPath, ctx);
+                    await _fileSystemProvider.UploadFileAsync(localPlaceHolder.FullPath, ctx);
                     localPlaceHolder.Reload();
                 }
 
@@ -452,7 +452,7 @@ public class SynchronizationHandler : IDisposable
 
     private async void LocalSyncTimerCallback(object state)
     {
-        if (_fileProvider.Status != FileProviderStatus.Ready)
+        if (_fileSystemProvider.Status != FileProviderStatus.Ready)
         {
             return;
         }
@@ -475,7 +475,7 @@ public class SynchronizationHandler : IDisposable
 
     private async void FailedQueueTimerCallback(object state)
     {
-        if (_fileProvider.Status != FileProviderStatus.Ready)
+        if (_fileSystemProvider.Status != FileProviderStatus.Ready)
         {
             return;
         }
@@ -545,7 +545,7 @@ public class SynchronizationHandler : IDisposable
 
         if (!FileExcluder.IsExcludedFile(relativeFileName) && !FileExcluder.IsExcludedFile(relativeFileNameDestination))
         {
-            var result = await _fileProvider.MoveFileAsync(relativeFileName, relativeFileNameDestination, isDirectory);
+            var result = await _fileSystemProvider.Operations.MoveFileAsync(relativeFileName, relativeFileNameDestination, isDirectory);
             status = result.Succeeded
                 ? NTStatus.STATUS_SUCCESS
                 : NTStatus.STATUS_ACCESS_DENIED;
@@ -585,7 +585,7 @@ public class SynchronizationHandler : IDisposable
         _connectionKey = connectionKey;
     }
 
-    internal async Task<FileOperationResult<List<FilePlaceholder>>> GetServerFileListAsync(
+    private async Task<FileOperationResult<List<FilePlaceholder>>> GetRemoteFileListAsync(
         string relativePath,
         CancellationToken cancellationToken)
     {
@@ -596,7 +596,7 @@ public class SynchronizationHandler : IDisposable
             Data = new List<FilePlaceholder>()
         };
 
-        await using var fileList = _fileProvider.GetNewFileList();
+        await using var fileList = _fileSystemProvider.Operations.GetNewFileList();
         var result = await fileList.OpenAsync(relativePath, cancellationToken);
         if (!result.Succeeded)
         {
@@ -715,7 +715,7 @@ public class SynchronizationHandler : IDisposable
         // Get Filelist from Server on FullSync
         if (syncMode >= SyncMode.Full && !isExcludedFile)
         {
-            var getServerFileListResult = await GetServerFileListAsync(relativeFolder, ctx);
+            var getServerFileListResult = await GetRemoteFileListAsync(relativeFolder, ctx);
             if (getServerFileListResult.Status != CloudFilterNTStatus.STATUS_NOT_A_CLOUD_FILE)
             {
                 getServerFileListResult.ThrowOnFailure();
@@ -748,8 +748,7 @@ public class SynchronizationHandler : IDisposable
                 var localPlaceholder = new ExtendedPlaceholderState(findData, folder);
                 localPlaceholders.Add(localPlaceholder);
 
-                var remotePlaceholder = remotePlaceholderes.FirstOrDefault(a =>
-                    string.Equals(a.RelativeFileName, findData.cFileName, StringComparison.CurrentCultureIgnoreCase));
+                var remotePlaceholder = remotePlaceholderes.FirstOrDefault(a => PathHelper.Equals(a.RelativeFileName, findData.cFileName));
 
                 if (localPlaceholder.IsDirectory)
                 {
@@ -804,7 +803,7 @@ public class SynchronizationHandler : IDisposable
                                 var placeholder = new DynamicServerPlaceholder(PathHelper.GetRelativePath(
                                         fullFilePath,
                                         _options.LocalPath),
-                                    localPlaceholder.IsDirectory, _fileProvider);
+                                    localPlaceholder.IsDirectory, _fileSystemProvider);
 
                                 await ProcessChangedDataAsync(
                                     fullFilePath,
@@ -852,7 +851,7 @@ public class SynchronizationHandler : IDisposable
                         dynPlaceholder = new DynamicServerPlaceholder(
                             relativePath,
                             localPlaceholder.IsDirectory,
-                            _fileProvider);
+                            _fileSystemProvider);
                     }
 
                     await ProcessChangedDataAsync(
@@ -891,7 +890,7 @@ public class SynchronizationHandler : IDisposable
         {
             var fullFilePath = Path.Combine(folder, remotePlaceholder.RelativeFileName);
 
-            if (!localPlaceholders.Any(a => string.Equals(a.FullPath, fullFilePath, StringComparison.CurrentCultureIgnoreCase)))
+            if (!localPlaceholders.Any(a => PathHelper.Equals(a.FullPath, fullFilePath)))
             {
                 var info = new CF_PLACEHOLDER_CREATE_INFO[1];
                 info[0] = CreatePlaceholderInfo(remotePlaceholder, Guid.NewGuid().ToString());
@@ -933,7 +932,7 @@ public class SynchronizationHandler : IDisposable
             return;
         }
 
-        using ExtendedPlaceholderState localPlaceHolder = new(fullPath);
+        using var localPlaceHolder = new ExtendedPlaceholderState(fullPath);
         await ProcessChangedDataAsync(fullPath, localPlaceHolder, syncMode, ctx).ConfigureAwait(continueOnCapturedContext: false);
     }
 
@@ -943,8 +942,8 @@ public class SynchronizationHandler : IDisposable
         SyncMode syncMode,
         CancellationToken ctx)
     {
-        var relativePath = PathHelper.GetRelativePath(fullPath, _options.LocalPath);
-        var placeHolder = new DynamicServerPlaceholder(relativePath, localPlaceHolder.IsDirectory, _fileProvider);
+        var relativePath = PathHelper.GetRelativePath(fullPath, _options.LocalPathNormalized);
+        var placeHolder = new DynamicServerPlaceholder(relativePath, localPlaceHolder.IsDirectory, _fileSystemProvider);
         await ProcessChangedDataAsync(fullPath, localPlaceHolder, placeHolder, syncMode, ctx);
     }
 
@@ -998,7 +997,7 @@ public class SynchronizationHandler : IDisposable
 
     private void CbFetchData(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
-        var cancelFetch = _fileProvider.Status != FileProviderStatus.Ready;
+        var cancelFetch = _fileSystemProvider.Status != FileProviderStatus.Ready;
         if (cancelFetch)
         {
             var opInfo = CreateOperationInfo(callbackinfo, CF_OPERATION_TYPE.CF_OPERATION_TYPE_TRANSFER_DATA);
@@ -1052,7 +1051,7 @@ public class SynchronizationHandler : IDisposable
 
         var opInfo = CreateOperationInfo(callbackinfo, CF_OPERATION_TYPE.CF_OPERATION_TYPE_TRANSFER_PLACEHOLDERS);
 
-        var cancelFetch = _fileProvider.Status != FileProviderStatus.Ready;
+        var cancelFetch = _fileSystemProvider.Status != FileProviderStatus.Ready;
         if (!cancelFetch)
         {
             var processInfo = Marshal.PtrToStructure<CF_PROCESS_INFO>(callbackinfo.ProcessInfo);
@@ -1113,7 +1112,7 @@ public class SynchronizationHandler : IDisposable
         using var infos = new SafePlaceholderList();
 
         var completionStatus = CloudFilterNTStatus.STATUS_SUCCESS;
-        var getServerFileListResult = await GetServerFileListAsync(relativePath, cancellationToken);
+        var getServerFileListResult = await GetRemoteFileListAsync(relativePath, cancellationToken);
 
         if (!getServerFileListResult.Succeeded)
         {
@@ -1165,8 +1164,7 @@ public class SynchronizationHandler : IDisposable
         foreach (var remotePlaceholder in getServerFileListResult.Data)
         {
             var localPlaceholder = localPlaceholders
-                .FirstOrDefault(a =>
-                    string.Equals(a.RelativeFileName, remotePlaceholder.RelativeFileName, StringComparison.CurrentCultureIgnoreCase));
+                .FirstOrDefault(a => PathHelper.Equals(a.RelativeFileName, remotePlaceholder.RelativeFileName));
 
             if (remotePlaceholder.FileAttributes.HasFlag(FileAttributes.Directory) == false
                 && remotePlaceholder.ETag != localPlaceholder?.ETag)
@@ -1178,8 +1176,7 @@ public class SynchronizationHandler : IDisposable
 
         foreach (var item in localPlaceholders)
         {
-            if (getServerFileListResult.Data.Any(a =>
-                    string.Equals(a.RelativeFileName, item.RelativeFileName, StringComparison.CurrentCultureIgnoreCase)))
+            if (getServerFileListResult.Data.Any(a => PathHelper.Equals(a.RelativeFileName, item.RelativeFileName)))
             {
                 continue;
             }
@@ -1481,7 +1478,7 @@ public class SynchronizationHandler : IDisposable
 
         NTStatus status;
 
-        if (_fileProvider.Status != FileProviderStatus.Ready)
+        if (_fileSystemProvider.Status != FileProviderStatus.Ready)
         {
             var opParams1 = CF_OPERATION_PARAMETERS.Create(new CF_OPERATION_PARAMETERS.ACKDELETE
             {
@@ -1517,7 +1514,7 @@ public class SynchronizationHandler : IDisposable
             goto skip;
         }
 
-        var result = await _fileProvider.DeleteFileAsync(dat.RelativePath, dat.IsDirectory);
+        var result = await _fileSystemProvider.Operations.DeleteFileAsync(dat.RelativePath, dat.IsDirectory);
         status = new NTStatus((uint)result.Status);
 
         skip:

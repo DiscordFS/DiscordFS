@@ -34,7 +34,7 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
 
     private string _instanceId;
     private string _instanceName;
-    private IRemoteFileProvider _remoteFileProvider;
+    private IRemoteFileSystemProvider _remoteFileSystemProvider;
     private SynchronizationHandler _synchronizationHandler;
 
     protected FileRangeManager FileRangeManager { get; private set; }
@@ -154,15 +154,15 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
     {
         EnsureNotDisposed();
 
-        if (_remoteFileProvider == null)
+        if (_remoteFileSystemProvider == null)
         {
-            _remoteFileProvider = CreateRemoteFileProvider();
-            _remoteFileProvider.Connect();
+            _remoteFileSystemProvider = CreateRemoteFileProvider();
+            _remoteFileSystemProvider.Connect();
         }
 
         if (_synchronizationHandler == null)
         {
-            _synchronizationHandler = new SynchronizationHandler(FileRangeManager, _remoteFileProvider, Options, _logger);
+            _synchronizationHandler = new SynchronizationHandler(FileRangeManager, _remoteFileSystemProvider, Options, _logger);
             _synchronizationHandler.Connect();
         }
     }
@@ -177,10 +177,10 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
             _synchronizationHandler = null;
         }
 
-        if (_remoteFileProvider != null)
+        if (_remoteFileSystemProvider != null)
         {
-            _remoteFileProvider.Dispose();
-            _remoteFileProvider = null;
+            _remoteFileSystemProvider.Dispose();
+            _remoteFileSystemProvider = null;
         }
     }
 
@@ -203,7 +203,7 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
         _disposed = true;
     }
 
-    protected abstract IRemoteFileProvider CreateRemoteFileProvider();
+    protected abstract IRemoteFileSystemProvider CreateRemoteFileProvider();
 
     protected abstract Task<string> GetInstanceIdAsync(TOptions options);
 

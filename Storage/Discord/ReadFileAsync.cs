@@ -7,15 +7,15 @@ namespace DiscordFS.Storage.Discord;
 
 public class ReadFileAsync : IReadFileAsync
 {
-    private readonly IRemoteFileProvider _provider;
+    private readonly IRemoteFileSystemProvider _systemProvider;
     private FileStream _fileStream;
     private OpenAsyncParams _openAsyncParams;
 
     public bool IsOpen { get; protected set; }
 
-    public ReadFileAsync(IRemoteFileProvider provider)
+    public ReadFileAsync(IRemoteFileSystemProvider systemProvider)
     {
-        _provider = provider;
+        _systemProvider = systemProvider;
     }
 
     public Task<ReadFileOpenResult> OpenAsync(OpenAsyncParams e)
@@ -30,7 +30,7 @@ public class ReadFileAsync : IReadFileAsync
             throw new InvalidOperationException(message: "Already open");
         }
 
-        if (_provider.Status != FileProviderStatus.Ready)
+        if (_systemProvider.Status != FileProviderStatus.Ready)
         {
             return Task.FromResult(new ReadFileOpenResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE));
         }
@@ -40,13 +40,13 @@ public class ReadFileAsync : IReadFileAsync
         _openAsyncParams = e;
         var openResult = new ReadFileOpenResult();
 
-        if (!Directory.Exists(_provider.Options.LocalPath))
+        if (!Directory.Exists(_systemProvider.Options.LocalPath))
         {
             openResult.SetError(CloudFileFetchErrorCode.Offline);
             goto skip;
         }
 
-        var fullPath = PathHelper.GetAbsolutePath(e.RelativeFileName, _provider.Options.LocalPath);
+        var fullPath = PathHelper.GetAbsolutePath(e.RelativeFileName, _systemProvider.Options.LocalPath);
 
         try
         {
@@ -79,7 +79,7 @@ public class ReadFileAsync : IReadFileAsync
             throw new InvalidOperationException(message: "Not open");
         }
 
-        if (_provider.Status != FileProviderStatus.Ready)
+        if (_systemProvider.Status != FileProviderStatus.Ready)
         {
             return new ReadFileReadResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE);
         }

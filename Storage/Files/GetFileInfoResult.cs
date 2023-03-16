@@ -9,8 +9,7 @@ public class GetFileInfoResult : FileOperationResult
 
     public GetFileInfoResult() { }
 
-    public GetFileInfoResult(CloudFilterNTStatus status)
-    {
-        Status = status;
-    }
+    public GetFileInfoResult(CloudFileFetchErrorCode error) : base(error) { }
+
+    public GetFileInfoResult(CloudFilterNTStatus status) : base(status) { }
 }

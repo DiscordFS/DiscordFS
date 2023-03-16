@@ -8,13 +8,13 @@ public class DynamicServerPlaceholder
     private readonly string _relativePath;
     private FilePlaceholder _placeholder;
     private readonly bool _isDirectory;
-    private readonly IRemoteFileProvider _remoteFileProvider;
+    private readonly IRemoteFileSystemProvider _remoteFileSystemProvider;
 
-    public DynamicServerPlaceholder(string relativePath, bool isDirectory, IRemoteFileProvider remoteFileProvider)
+    public DynamicServerPlaceholder(string relativePath, bool isDirectory, IRemoteFileSystemProvider remoteFileSystemProvider)
     {
         _relativePath = relativePath;
         _isDirectory = isDirectory;
-        _remoteFileProvider = remoteFileProvider;
+        _remoteFileSystemProvider = remoteFileSystemProvider;
     }
 
     public DynamicServerPlaceholder(FilePlaceholder placeholder)
@@ -22,13 +22,13 @@ public class DynamicServerPlaceholder
         _placeholder = placeholder;
     }
 
-    public async Task<FilePlaceholder> GetPlaceholder()
+    public async Task<FilePlaceholder> GetPlaceholderAsync()
     {
         if (_placeholder == null && !string.IsNullOrWhiteSpace(_relativePath))
         {
             if (!FileExcluder.IsExcludedFile(_relativePath))
             {
-                var getFileResult = await _remoteFileProvider.GetFileInfo(_relativePath, _isDirectory);
+                var getFileResult = await _remoteFileSystemProvider.Operations.GetFileInfoAsync(_relativePath, _isDirectory);
                 _placeholder = getFileResult.Placeholder;
 
                 if (getFileResult.Status == CloudFilterNTStatus.STATUS_NOT_A_CLOUD_FILE)

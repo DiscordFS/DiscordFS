@@ -3,13 +3,27 @@ using DiscordFS.Platforms.Windows.Storage;
 
 namespace DiscordFS.Storage.Files.Results;
 
-public class DeleteFileResult : FileOperationResult { }
+public class DeleteFileResult : FileOperationResult
+{
+    public DeleteFileResult() { }
 
-public class MoveFileResult : FileOperationResult { }
+    public DeleteFileResult(CloudFileFetchErrorCode error) : base(error) { }
+}
+
+public class MoveFileResult : FileOperationResult
+{
+    public MoveFileResult() { }
+
+    public MoveFileResult(CloudFileFetchErrorCode error) : base(error) { }
+}
 
 public class CreateFileResult : FileOperationResult
 {
     public FilePlaceholder FilePlaceholder;
+
+    public CreateFileResult() { }
+
+    public CreateFileResult(CloudFileFetchErrorCode error) : base(error) { }
 }
 
 public class FileOperationResult<T> : FileOperationResult

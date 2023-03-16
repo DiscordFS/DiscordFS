@@ -52,7 +52,7 @@ public class FileChunk
 
     public FileChunk() { }
 
-    public static FileChunk From(byte[] data, byte[] encryptionKey = null)
+    public static FileChunk Deserialize(byte[] data, byte[] encryptionKey = null)
     {
         using var ms = new MemoryStream(data);
         using var br = new BinaryReader(ms);
@@ -199,5 +199,36 @@ public class FileChunk
     {
         // todo: implement me
         return body;
+    }
+
+    public static ICollection<FileChunk> CreateChunks(
+        byte[] data,
+        bool useCompression,
+        int maxChunkSize,
+        byte[] encryptionKey = null)
+    {
+        var dataChunks = data
+            .Chunk(maxChunkSize)
+            .ToArray();
+
+        var chunks = new List<FileChunk>();
+        var index = 0;
+
+        using var md5 = MD5.Create();
+        foreach (var chunk in dataChunks)
+        {
+            var fileChunk = new FileChunk(useCompression, encryptionKey)
+            {
+                Data = chunk,
+                IsLast = index == dataChunks.Length - 1,
+                Order = (byte)index++,
+                HashAlgorithm = HashAlgorithm.Md5,
+                Hash = md5.ComputeHash(chunk)
+            };
+
+            chunks.Add(fileChunk);
+        }
+
+        return chunks;
     }
 }
