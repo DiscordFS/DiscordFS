@@ -5,6 +5,26 @@ Use Discord as your personal free cloud storage
 
 <br clear="left"/>
 
+## Current State
+**PROJECT IS WORK IN PROGRESS / NOT READY FOR USE YET**
+
+- [x] Synchronize data from client to Discord
+- [ ] Synchronize data from Discord to client
+- [x] Windows Explorer on-demand files integration
+- [x] File placeholders
+- [x] File index database
+- [x] File serialization & chunking
+- [x] File compression
+- [ ] Display current sync status in Windows Explorer
+- [ ] File encryption
+- [ ] File history / versioning
+- [ ] Report sync download/upload progress to Windows
+- [ ] Read / write files using streams instead of byte arrays to reduce memory usage
+- [ ] Proper UI (initial set-up, sync status, etc.)
+- [ ] ReadFileAsync / WriteFileAsync / GetFileListAsync Discord based implementation
+- [ ] Integrate other cloud storage providers (like WebDAV, S3, Azure, etc) & rename project
+- [ ] Auto-run on system startup
+
 ## Quick Start
 
 ### Requirements
@@ -39,13 +59,14 @@ THE USE OF ANY TRADE NAME OR TRADEMARK IS FOR IDENTIFICATION AND REFERENCE PURPO
 ASSOCIATION WITH THE TRADEMARK HOLDER OF THEIR PRODUCT BRAND.
   
 DO NOT STORE ANY IMPORTANT FILES USING THIS SOFTWARE. 
-DISCORD INC MAY REMOVE OR RESTRICT ACCESS TO ANY FILES AT ANY GIVEN TIME AT ITS SOLE DISCRETION. 
+DISCORD INC MAY REMOVE OR RESTRICT ACCESS TO ANY FILES AT ANY GIVEN TIME FOR ANY REASON AT ITS SOLE DISCRETION. 
 STORED FILES MAY GET CORRUPTED OR LOST AT ANY GIVEN TIME FOR ANY REASON. 
 
-NEITHER THE CREATORS OF THIS PROJECT NOR THE CONTRIBUTORS MAY BE HELD LIABLE FOR ANY DAMAGE CAUSED BY THE USAGE OF THIS SOFTWARE IN ANY WAY.
+NEITHER THE CREATORS OF THIS PROJECT NOR THE CONTRIBUTORS MAY BE HELD LIABLE FOR ANY DIRECT OR INDIRECT DAMAGE CAUSED BY 
+THE USAGE OF THIS SOFTWARE IN ANY WAY.
 
 ## Copyright
-Copyright (C) 2023 Enes Sadık Özbek and Contributors.
+Copyright (C) 2023 Enes Sadık Özbek and contributors.
 
 Most of this project's code is, unless otherwise specified, licensed under the GNU GPL v3 license.  
 See the [LICENSE](https://github.com/Trojaner/DiscordFS/blob/main/LICENSE) file for more information.
