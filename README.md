@@ -9,21 +9,21 @@ Use Discord as your personal free cloud storage
 **PROJECT IS WORK IN PROGRESS / NOT READY FOR USE YET**
 
 - [x] Synchronize data from client to Discord
-- [ ] Synchronize data from Discord to client
+- [ ] [Synchronize data from Discord to client](https://github.com/Trojaner/DiscordFS/issues/10)
 - [x] Windows Explorer on-demand files integration
 - [x] File placeholders
 - [x] File index database
 - [x] File serialization & chunking
 - [x] File compression
-- [ ] Display current sync status in Windows Explorer
-- [ ] File encryption
-- [ ] File history / versioning
-- [ ] Report sync download/upload progress to Windows
-- [ ] Read / write files using streams instead of byte arrays to reduce memory usage
-- [ ] Proper UI (initial set-up, sync status, etc.)
-- [ ] ReadFileAsync / WriteFileAsync / GetFileListAsync Discord based implementation
-- [ ] Integrate other cloud storage providers (like WebDAV, S3, Azure, etc) & rename project
-- [ ] Auto-run on system startup
+- [ ] [Display current sync status in Windows Explorer](https://github.com/Trojaner/DiscordFS/issues/2)
+- [ ] [File encryption](https://github.com/Trojaner/DiscordFS/issues/1)
+- [ ] [File history / versioning](https://github.com/Trojaner/DiscordFS/issues/3)
+- [ ] [Report sync download/upload progress to Windows](https://github.com/Trojaner/DiscordFS/issues/4)
+- [ ] [Read / write files using streams instead of byte arrays to reduce memory usage](https://github.com/Trojaner/DiscordFS/issues/5)
+- [ ] [Proper UI (initial set-up, sync status, etc.)](https://github.com/Trojaner/DiscordFS/issues/6)
+- [ ] [ReadFileAsync / WriteFileAsync / GetFileListAsync Discord based implementation](https://github.com/Trojaner/DiscordFS/issues/7)
+- [ ] [Integrate other cloud storage providers (like WebDAV, S3, Azure, etc) & rename project](https://github.com/Trojaner/DiscordFS/issues/9)
+- [ ] [Auto-run on system startup](https://github.com/Trojaner/DiscordFS/issues/8)
 
 ## Quick Start
 
