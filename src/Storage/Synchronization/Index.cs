@@ -104,6 +104,7 @@ public class Index
 
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .WithTypeConverter(new DateTimeOffsetConverter())
             .Build();
 
         var yaml = Encoding.UTF8.GetString(textBytes, index: 0, count);
@@ -117,6 +118,7 @@ public class Index
         const int offset = sizeof(int);
         var serializer = new SerializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .WithTypeConverter(new DateTimeOffsetConverter())
             .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitEmptyCollections)
             .Build();
 
@@ -162,6 +164,11 @@ public class Index
 
     public bool DirectoryExists(string relativePath)
     {
+        if (relativePath == string.Empty)
+        {
+            return true;
+        }
+
         return GetEntry(relativePath, EntryType.Directory) != null;
     }
 

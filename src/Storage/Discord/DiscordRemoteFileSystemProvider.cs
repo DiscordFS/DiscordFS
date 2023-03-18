@@ -130,6 +130,7 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
             if (IsIndexDbMessage(message))
             {
                 _indexMessageId = message.Id;
+                _lastIndexEditTimestamp = message.EditedTimestamp;
             }
         }
     }
@@ -203,8 +204,10 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         EnsureNotDisposed();
 
         SetReady(ready: false);
+
         _indexMessageId = 0;
         LastKnownRemoteIndex = null;
+        _lastIndexEditTimestamp = null;
 
         return Task.CompletedTask;
     }
@@ -281,8 +284,9 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
         await Task.Delay(millisecondsDelay: 500);
         await message.PinAsync();
-        _indexMessageId = message.Id;
 
+        _indexMessageId = message.Id;
+        _lastIndexEditTimestamp = message.EditedTimestamp;
         LastKnownRemoteIndex = indexFile;
     }
 
