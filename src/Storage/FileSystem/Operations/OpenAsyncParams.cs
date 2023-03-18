@@ -11,7 +11,7 @@ public class OpenAsyncParams
 
     public FilePlaceholder FileInfo { get; set; }
 
-    public string RelativeFileName { get; set; }
+    public string RelativePath { get; set; }
 
     public UploadMode UploadMode { get; set; }
 }

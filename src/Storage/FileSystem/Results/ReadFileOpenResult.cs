@@ -13,8 +13,7 @@ public class ReadFileOpenResult : FileOperationResult
         Placeholder = placeholder;
     }
 
-    public ReadFileOpenResult(CloudFilterNTStatus status)
-    {
-        Status = status;
-    }
+    public ReadFileOpenResult(CloudFilterNTStatus status) : base(status) { }
+
+    public ReadFileOpenResult(CloudFileFetchErrorCode error) : base(error) { }
 }

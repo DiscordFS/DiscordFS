@@ -3,7 +3,7 @@ using DiscordFS.Storage.Synchronization;
 
 namespace DiscordFS.Storage.FileSystem.Operations;
 
-public interface IWriteFileAsync : IDisposable, IAsyncDisposable
+public interface IWriteFileStream : IDisposable, IAsyncDisposable
 {
     public UploadMode SupportedUploadModes { get; }
 

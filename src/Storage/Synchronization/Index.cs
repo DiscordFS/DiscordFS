@@ -180,7 +180,7 @@ public class Index
     {
         if (createSubdirectories)
         {
-            var directories = relativePath.Replace(oldValue: "\\", newValue: "/").Split(separator: '/');
+            var directories = relativePath.Split(Path.DirectorySeparatorChar);
             var current = directories[0];
             var i = 0;
 
@@ -206,10 +206,10 @@ public class Index
             Type = EntryType.Directory,
             Attributes = FileAttributes.Directory,
             RelativePath = relativePath,
-            CreationTime = DateTime.Now,
+            CreationTime = DateTimeOffset.UtcNow,
             FileSize = 0,
-            LastAccessTime = DateTime.Now,
-            LastModificationTime = DateTime.Now
+            LastAccessTime = DateTimeOffset.UtcNow,
+            LastModificationTime = DateTimeOffset.UtcNow
         };
 
         _entries.Add(entry);
@@ -338,14 +338,20 @@ public class Index
             Type = EntryType.File,
             RelativePath = relativeFileName,
             Attributes = FileAttributes.Normal,
-            CreationTime = DateTime.Now,
+            CreationTime = DateTimeOffset.UtcNow,
             FileSize = 0,
-            LastAccessTime = DateTime.Now,
-            LastModificationTime = DateTime.Now
+            LastAccessTime = DateTimeOffset.UtcNow,
+            LastModificationTime = DateTimeOffset.UtcNow
         };
 
         _entries.Add(entry);
         return entry;
+    }
+
+    public IEnumerable<IndexEntry> EnumerateDirectory(string relativePath)
+    {
+        return _entries
+            .Where(x => x.RelativePath.StartsWith(relativePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
     }
 }
 
@@ -366,22 +372,22 @@ public class IndexEntry
         FileSize = @base.FileSize;
         LastAccessTime = @base.LastAccessTime;
         LastModificationTime = @base.LastModificationTime;
-        MessageIds = @base.MessageIds?.ToList() ?? new List<ulong>();
+        Chunks = @base.Chunks?.ToList() ?? new List<IndexFileChunk>();
         RelativePath = @base.RelativePath;
         Type = @base.Type;
     }
 
     public FileAttributes Attributes { get; set; }
 
-    public DateTime CreationTime { get; set; }
+    public DateTimeOffset CreationTime { get; set; }
 
     public long FileSize { get; set; }
 
-    public DateTime LastAccessTime { get; set; }
+    public DateTimeOffset LastAccessTime { get; set; }
 
-    public DateTime LastModificationTime { get; set; }
+    public DateTimeOffset LastModificationTime { get; set; }
 
-    public List<ulong> MessageIds { get; set; }
+    public List<IndexFileChunk> Chunks { get; set; }
 
     public string RelativePath { get; set; }
 
@@ -419,4 +425,11 @@ public class IndexEntry
     {
         return new IndexEntry(this);
     }
+}
+
+public class IndexFileChunk
+{
+    public string Url { get; set; }
+
+    public long Size { get; set; }
 }

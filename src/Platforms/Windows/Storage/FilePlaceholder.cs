@@ -70,19 +70,10 @@ public class FilePlaceholder : BasicFileInfo
             ? 0
             : indexEntry.FileSize;
         FileAttributes = indexEntry.Attributes;
-        CreationTime = indexEntry.CreationTime;
-        LastWriteTime = indexEntry.LastModificationTime;
-        LastAccessTime = indexEntry.LastAccessTime;
-        ChangeTime = indexEntry.LastModificationTime;
+        CreationTime = indexEntry.CreationTime.LocalDateTime;
+        LastWriteTime = indexEntry.LastModificationTime.LocalDateTime;
+        LastAccessTime = indexEntry.LastAccessTime.LocalDateTime;
+        ChangeTime = indexEntry.LastModificationTime.LocalDateTime;
         ETag = "_" + indexEntry.LastModificationTime.ToUniversalTime().Ticks + "_" + FileSize;
     }
-}
-
-public class BasicFileInfo
-{
-    public DateTime ChangeTime;
-    public DateTime CreationTime;
-    public FileAttributes FileAttributes;
-    public DateTime LastAccessTime;
-    public DateTime LastWriteTime;
 }

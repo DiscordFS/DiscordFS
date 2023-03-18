@@ -2,7 +2,7 @@
 
 namespace DiscordFS.Storage.FileSystem.Operations;
 
-public interface IReadFileAsync : IDisposable, IAsyncDisposable
+public interface IReadFileStream : IDisposable, IAsyncDisposable
 {
     public Task<ReadFileCloseResult> CloseAsync();
 

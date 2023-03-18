@@ -26,20 +26,22 @@ public class ExtendedPlaceholderState : IDisposable
     {
         get
         {
-            if (_placeholderInfoStandard == null)
+            if (_placeholderInfoStandard != null)
             {
-                if (string.IsNullOrEmpty(FullPath))
-                {
-                    _placeholderInfoStandard = new CF_PLACEHOLDER_STANDARD_INFO();
-                }
-                else if (!PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PLACEHOLDER))
-                {
-                    _placeholderInfoStandard = new CF_PLACEHOLDER_STANDARD_INFO();
-                }
-                else
-                {
-                    _placeholderInfoStandard = GetPlaceholderInfoStandard(SafeFileHandleForCldApi);
-                }
+                return _placeholderInfoStandard.Value;
+            }
+
+            if (string.IsNullOrEmpty(FullPath))
+            {
+                _placeholderInfoStandard = new CF_PLACEHOLDER_STANDARD_INFO();
+            }
+            else if (!PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PLACEHOLDER))
+            {
+                _placeholderInfoStandard = new CF_PLACEHOLDER_STANDARD_INFO();
+            }
+            else
+            {
+                _placeholderInfoStandard = GetPlaceholderInfoStandard(SafeFileHandleForCldApi);
             }
 
             return _placeholderInfoStandard.Value;
@@ -48,31 +50,25 @@ public class ExtendedPlaceholderState : IDisposable
 
     public HFILE SafeFileHandleForCldApi
     {
-        get
-        {
-            if (_safeFileHandleForCldApi == null)
-            {
-                _safeFileHandleForCldApi = new SafeCreateFileForCldApi(FullPath, IsDirectory);
-            }
-
-            return _safeFileHandleForCldApi;
-        }
+        get { return _safeFileHandleForCldApi ??= new SafeCreateFileForCldApi(FullPath, IsDirectory); }
     }
 
-    private bool _disposedValue;
-    private WIN32_FIND_DATA _findData;
+    private bool _disposed;
     private CF_PLACEHOLDER_STANDARD_INFO? _placeholderInfoStandard;
     private SafeCreateFileForCldApi _safeFileHandleForCldApi;
-    public FileAttributes Attributes;
 
-    public string ETag;
+    public FileAttributes Attributes { get; set; }
+
+    public string ETag { get; set; }
 
     // Fake ID.
-    public string FileId = Guid.NewGuid().ToString();
-    public ulong FileSize;
-    public DateTime LastWriteTime;
+    public string FileId { get; set; } = Guid.NewGuid().ToString();
 
-    public CF_PLACEHOLDER_STATE PlaceholderState;
+    public ulong FileSize { get; set; }
+
+    public DateTime LastWriteTime { get; set; }
+
+    public CF_PLACEHOLDER_STATE PlaceholderState { get; set; }
 
     public ExtendedPlaceholderState(string fullPath)
     {
@@ -86,10 +82,8 @@ public class ExtendedPlaceholderState : IDisposable
     {
         if (!string.IsNullOrEmpty(directory))
         {
-            FullPath = directory + "\\" + findData.cFileName;
+            FullPath = directory + Path.DirectorySeparatorChar + findData.cFileName;
         }
-
-        _findData = findData;
 
         SetValuesByFindData(findData);
     }
@@ -130,7 +124,7 @@ public class ExtendedPlaceholderState : IDisposable
         {
             fixed (void* fileId = FileId)
             {
-                res = CfConvertToPlaceholder(fHandle, (nint)fileId, (uint)fileIdSize, flags, out var usn);
+                res = CfConvertToPlaceholder(fHandle, (nint)fileId, (uint)fileIdSize, flags, out _);
             }
         }
 
@@ -256,10 +250,8 @@ public class ExtendedPlaceholderState : IDisposable
         Debug.WriteLine("EnableOnDemandPopulation " + FullPath, TraceLevel.Verbose);
 
         using var fHandle = new SafeOpenFileWithOplock(FullPath, CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_NONE);
-
         if (fHandle.IsInvalid)
         {
-            Debug.WriteLine(format: "EnableOnDemandPopulation FAILED: Invalid Handle!", TraceLevel.Warning);
             return false;
         }
 
@@ -531,7 +523,7 @@ public class ExtendedPlaceholderState : IDisposable
                     dehydrateRangesCount = 1;
                 }
 
-                var res1 = CfUpdatePlaceholder(fHandle, CreateFSMetaData(placeholder), (nint)fileId, (uint)fileIdSize, dehydrateRanges,
+                var res1 = CfUpdatePlaceholder(fHandle, CreateFsMetaData(placeholder), (nint)fileId, (uint)fileIdSize, dehydrateRanges,
                     dehydrateRangesCount, cFUpdateFlags, ref usn);
                 if (!res1.Succeeded)
                 {
@@ -550,14 +542,14 @@ public class ExtendedPlaceholderState : IDisposable
 
     protected virtual void Dispose(bool disposing)
     {
-        if (!_disposedValue)
+        if (!_disposed)
         {
             if (disposing)
             {
                 _safeFileHandleForCldApi?.Dispose();
             }
 
-            _disposedValue = true;
+            _disposed = true;
         }
     }
 
@@ -573,7 +565,7 @@ public class ExtendedPlaceholderState : IDisposable
         };
     }
 
-    private CF_FS_METADATA CreateFSMetaData(FilePlaceholder placeholder)
+    private CF_FS_METADATA CreateFsMetaData(FilePlaceholder placeholder)
     {
         return new CF_FS_METADATA
         {
@@ -595,13 +587,13 @@ public class ExtendedPlaceholderState : IDisposable
         {
             return GetPlaceholderInfoStandard(handle);
         }
-        catch (Exception e)
+        catch (Exception)
         {
             return default;
         }
     }
 
-    private CF_PLACEHOLDER_STANDARD_INFO GetPlaceholderInfoStandard(HFILE fileHandle)
+    private static CF_PLACEHOLDER_STANDARD_INFO GetPlaceholderInfoStandard(HFILE fileHandle)
     {
         if (fileHandle.IsInvalid)
         {

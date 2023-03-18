@@ -14,8 +14,7 @@ public class FileChunk
      * HEADER
      * ------
      * [Version]          - 1 byte
-     * [Order]            - 1 byte
-     * [IsLast]           - 1 byte
+     * [Index]            - 4 bytes
      * [IsCompressed]     - 1 byte
      * [IsEncrypted]      - 1 byte
      *                    
@@ -38,17 +37,14 @@ public class FileChunk
 
     public bool IsEncrypted { get; set; }
 
-    public bool IsLast { get; set; }
+    public int Index { get; set; }
 
-    public byte Order { get; set; }
-
-    private byte[] _encryptionKey;
+    private static readonly MD5 Md5 = MD5.Create();
 
     public FileChunk(bool useCompression, byte[] encryptionKey = null)
     {
         IsCompressed = useCompression;
         IsEncrypted = encryptionKey != null;
-        _encryptionKey = encryptionKey;
     }
 
     public FileChunk() { }
@@ -68,8 +64,7 @@ public class FileChunk
             throw new Exception(message: "File chunk version is not supported");
         }
 
-        chunk.Order = br.ReadByte();
-        chunk.IsLast = br.ReadBoolean();
+        chunk.Index = br.ReadInt32();
         chunk.IsCompressed = br.ReadBoolean();
         chunk.IsEncrypted = br.ReadBoolean();
 
@@ -113,13 +108,7 @@ public class FileChunk
     public static byte[] GetFileData(FileChunk[] chunks, string relativePath)
     {
         // Ensure chunks are ordered correctly
-        chunks = chunks.OrderBy(x => x.Order).ToArray();
-
-        var last = chunks.SingleOrDefault(x => x.IsLast);
-        if (last == null || last != chunks.Last())
-        {
-            throw new Exception($"File corrupted: {relativePath}: invalid last chunk");
-        }
+        chunks = chunks.OrderBy(x => x.Index).ToArray();
 
         var result = new byte[chunks.Sum(x => x.Data.Length)];
         var index = 0;
@@ -133,14 +122,15 @@ public class FileChunk
         return result;
     }
 
-    public byte[] Serialize()
+    public byte[] Serialize(byte[] encryptionKey = null)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
 
+        IsEncrypted = encryptionKey != null;
+
         bw.Write(Version);
-        bw.Write(Order);
-        bw.Write(IsLast);
+        bw.Write(Index);
         bw.Write(IsCompressed);
         bw.Write(IsEncrypted);
 
@@ -154,7 +144,7 @@ public class FileChunk
 
         if (IsEncrypted)
         {
-            body = Encrypt(body);
+            body = Encrypt(body, encryptionKey);
         }
 
         bw.Write(originalSize);
@@ -196,40 +186,29 @@ public class FileChunk
         return body;
     }
 
-    private static byte[] Encrypt(byte[] body)
+    private static byte[] Encrypt(byte[] body, byte[] encryptionKe)
     {
         // todo: implement me
         return body;
     }
 
-    public static ICollection<FileChunk> CreateChunks(
+
+    public static FileChunk CreateChunk(
+        int index,
         byte[] data,
-        bool useCompression,
-        int maxChunkSize,
-        byte[] encryptionKey = null)
+        int offset,
+        int length,
+        bool useCompression)
     {
-        var dataChunks = data
-            .Chunk(maxChunkSize)
-            .ToArray();
+        var newData = new byte[length];
+        Buffer.BlockCopy(data, srcOffset: 0, newData, offset, length);
 
-        var chunks = new List<FileChunk>();
-        var index = 0;
-
-        using var md5 = MD5.Create();
-        foreach (var chunk in dataChunks)
+        return new FileChunk(useCompression)
         {
-            var fileChunk = new FileChunk(useCompression, encryptionKey)
-            {
-                Data = chunk,
-                IsLast = index == dataChunks.Length - 1,
-                Order = (byte)index++,
-                HashAlgorithm = HashAlgorithm.Md5,
-                Hash = md5.ComputeHash(chunk)
-            };
-
-            chunks.Add(fileChunk);
-        }
-
-        return chunks;
+            Data = newData,
+            Index = index,
+            HashAlgorithm = HashAlgorithm.Md5,
+            Hash = Md5.ComputeHash(data)
+        };
     }
 }

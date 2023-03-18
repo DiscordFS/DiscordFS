@@ -51,7 +51,7 @@ public static class MauiProgram
 
         builder.Services.AddSingleton<IDiscordClient, DiscordSocketClient>();
         builder.Services.AddSingleton<IAppConfigurationManager, AppConfigurationManager>();
-        ServiceCollectionServiceExtensions.AddSingleton<IDiscordStorageProvider, DiscordStorageProvider>(builder.Services);
+        builder.Services.AddSingleton<IDiscordStorageProvider, DiscordStorageProvider>();
 
         return builder.Build();
     }

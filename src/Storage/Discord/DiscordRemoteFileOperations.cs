@@ -153,19 +153,19 @@ public class DiscordRemoteFileOperations : IRemoteFileOperations
         return Task.FromResult(getFileInfoResult);
     }
 
-    public IFileListAsync GetNewFileList()
+    public IFileListStream GetNewFileList()
     {
-        return new GetFileListAsync(_fileSystemProvider);
+        return new DiscordGetFileListStream(_fileSystemProvider);
     }
 
-    public IReadFileAsync GetNewReadFile()
+    public IReadFileStream GetNewReadFile()
     {
-        return new ReadFileAsync(_fileSystemProvider);
+        return new ReadFileStream(_fileSystemProvider);
     }
 
-    public IWriteFileAsync GetNewWriteFile()
+    public IWriteFileStream GetNewWriteFile()
     {
-        return new WriteFileAsync(_fileSystemProvider);
+        return new DiscordWriteFileStream(_fileSystemProvider);
     }
 
     public async Task<MoveFileResult> MoveFileAsync(string relativeFileName, string relativeDestination, bool isDirectory)

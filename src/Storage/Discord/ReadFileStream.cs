@@ -1,22 +1,24 @@
-﻿using DiscordFS.Helpers;
-using DiscordFS.Platforms.Windows.Storage;
+﻿using DiscordFS.Platforms.Windows.Storage;
 using DiscordFS.Storage.FileSystem;
 using DiscordFS.Storage.FileSystem.Operations;
 using DiscordFS.Storage.FileSystem.Results;
+using DiscordFS.Storage.Synchronization;
 
 namespace DiscordFS.Storage.Discord;
 
-public class ReadFileAsync : IReadFileAsync
+public class ReadFileStream : IReadFileStream
 {
-    private readonly IRemoteFileSystemProvider _systemProvider;
-    private FileStream _fileStream;
+    private readonly DiscordRemoteFileSystemProvider _discordFs;
+
+    private IndexEntry _entry;
     private OpenAsyncParams _openAsyncParams;
+    private bool _disposed;
 
     public bool IsOpen { get; protected set; }
 
-    public ReadFileAsync(IRemoteFileSystemProvider systemProvider)
+    public ReadFileStream(DiscordRemoteFileSystemProvider discordFs)
     {
-        _systemProvider = systemProvider;
+        _discordFs = discordFs;
     }
 
     public Task<ReadFileOpenResult> OpenAsync(OpenAsyncParams e)
@@ -31,9 +33,10 @@ public class ReadFileAsync : IReadFileAsync
             throw new InvalidOperationException(message: "Already open");
         }
 
-        if (_systemProvider.Status != FileSystemProviderStatus.Ready)
+        var index = _discordFs.LastKnownRemoteIndex?.Clone();
+        if (_discordFs.Status != FileSystemProviderStatus.Ready || index == null)
         {
-            return Task.FromResult(new ReadFileOpenResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE));
+            return Task.FromResult(new ReadFileOpenResult(CloudFileFetchErrorCode.Offline));
         }
 
         IsOpen = true;
@@ -41,30 +44,21 @@ public class ReadFileAsync : IReadFileAsync
         _openAsyncParams = e;
         var openResult = new ReadFileOpenResult();
 
-        if (!Directory.Exists(_systemProvider.Options.LocalPath))
-        {
-            openResult.SetError(CloudFileFetchErrorCode.Offline);
-            goto skip;
-        }
-
-        var fullPath = PathHelper.GetAbsolutePath(e.RelativeFileName, _systemProvider.Options.LocalPath);
-
         try
         {
-            if (!File.Exists(fullPath))
+            if (!index.FileExists(e.RelativePath))
             {
-                throw new FileNotFoundException(e.RelativeFileName);
+                throw new FileNotFoundException(e.RelativePath);
             }
 
-            _fileStream = File.OpenRead(fullPath);
-            openResult.Placeholder = new FilePlaceholder(fullPath);
+            _entry = index.GetFile(e.RelativePath);
+            openResult.Placeholder = new FilePlaceholder(_entry);
         }
         catch (Exception ex)
         {
             openResult.SetException(ex);
         }
 
-        skip:
         return Task.FromResult(openResult);
     }
 
@@ -80,7 +74,7 @@ public class ReadFileAsync : IReadFileAsync
             throw new InvalidOperationException(message: "Not open");
         }
 
-        if (_systemProvider.Status != FileSystemProviderStatus.Ready)
+        if (_discordFs.Status != FileSystemProviderStatus.Ready)
         {
             return new ReadFileReadResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE);
         }
@@ -89,8 +83,30 @@ public class ReadFileAsync : IReadFileAsync
 
         try
         {
-            _fileStream.Position = offset;
-            readResult.BytesRead = await _fileStream.ReadAsync(buffer, offsetBuffer, count, _openAsyncParams.CancellationToken);
+            var currentPos = 0L;
+            readResult.BytesRead = 0;
+
+            // todo: Parallel.ForEachAsync(_entry.Chunks)
+
+            foreach (var chunkInfo in _entry.Chunks)
+            {
+                if (currentPos >= offset && currentPos <= offset + count)
+                {
+                    var chunk = await DownloadChunkAsync(chunkInfo);
+                    var size = chunk.Data.Length;
+
+                    Buffer.BlockCopy(
+                        chunk.Data,
+                        srcOffset: 0,
+                        buffer,
+                        readResult.BytesRead + offsetBuffer,
+                        size);
+
+                    readResult.BytesRead += size;
+                }
+
+                currentPos += chunkInfo.Size;
+            }
         }
         catch (Exception ex)
         {
@@ -98,6 +114,15 @@ public class ReadFileAsync : IReadFileAsync
         }
 
         return readResult;
+    }
+
+    private async Task<FileChunk> DownloadChunkAsync(IndexFileChunk chunk)
+    {
+        // todo: cache attachments until X total size so we don't have to download them again
+
+        var client = _discordFs.HttpClientFactory.CreateClient(name: "DiscordFS");
+        var data = await client.GetByteArrayAsync(chunk.Url, _openAsyncParams.CancellationToken);
+        return FileChunk.Deserialize(data);
     }
 
     public Task<ReadFileCloseResult> CloseAsync()
@@ -116,7 +141,6 @@ public class ReadFileAsync : IReadFileAsync
 
         try
         {
-            _fileStream.Close();
             IsOpen = false;
         }
         catch (Exception ex)
@@ -127,26 +151,15 @@ public class ReadFileAsync : IReadFileAsync
         return Task.FromResult(closeResult);
     }
 
-    private bool _disposed;
-
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposed)
         {
             if (disposing)
             {
-                try
+                if (IsOpen)
                 {
-                    if (IsOpen)
-                    {
-                        IsOpen = false;
-                        _fileStream?.Flush();
-                        _fileStream?.Close();
-                    }
-                }
-                finally
-                {
-                    _fileStream?.Dispose();
+                    IsOpen = false;
                 }
             }
 
@@ -160,28 +173,14 @@ public class ReadFileAsync : IReadFileAsync
         GC.SuppressFinalize(this);
     }
 
-    protected virtual async ValueTask DisposeAsyncCore()
+    protected virtual ValueTask DisposeAsyncCore()
     {
-        try
+        if (IsOpen)
         {
-            if (IsOpen)
-            {
-                IsOpen = false;
-                if (_fileStream != null)
-                {
-                    await _fileStream.FlushAsync();
-                }
+            IsOpen = false;
+        }
 
-                _fileStream?.Close();
-            }
-        }
-        finally
-        {
-            if (_fileStream != null)
-            {
-                await _fileStream.DisposeAsync();
-            }
-        }
+        return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()

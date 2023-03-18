@@ -2,11 +2,11 @@
 
 namespace DiscordFS.Storage.FileSystem.Operations;
 
-public interface IFileListAsync : IDisposable, IAsyncDisposable
+public interface IFileListStream : IDisposable, IAsyncDisposable
 {
     public Task<FileOperationResult> CloseAsync();
 
     public Task<GetNextFileResult> GetNextAsync();
 
-    public Task<FileOperationResult> OpenAsync(string relativeFileName, CancellationToken ctx);
+    public Task<FileOperationResult> OpenAsync(string relativePath, CancellationToken ctx);
 }

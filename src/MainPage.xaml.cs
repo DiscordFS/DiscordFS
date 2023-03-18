@@ -26,7 +26,11 @@ public partial class MainPage
             if (string.IsNullOrWhiteSpace(config.Discord?.BotToken))
             {
                 config.Discord ??= new DiscordConfiguration();
-                config.Discord.BotToken = await DisplayPromptAsync(title: "Bot token", message: "Please enter bot token:");
+                config.Discord.BotToken = await DisplayPromptAsync(
+                    title: "Bot token",
+                    message: "Please enter bot token:",
+                    accept: "Connect",
+                    cancel: null);
             }
 
             await ValidateDiscordTokenAndConnectAsync(config.Discord.BotToken);
@@ -80,7 +84,7 @@ public partial class MainPage
 
         var addEncryptionKey = await DisplayAlert(
             title: "Encryption setup"
-            , message: "No encryption is set up. Would you like to set up encryption (this cannot be changed later)?",
+            , message: "Would you like to set up encryption? This cannot be changed later.",
             accept: "Yes",
             cancel: "No");
 
@@ -90,7 +94,12 @@ public partial class MainPage
             return null;
         }
 
-        var password = await DisplayPromptAsync(title: "Encryption setup", message: "Please enter your desired encryption password:");
+        var password = await DisplayPromptAsync(
+            title: "Encryption setup",
+            message: "Please enter your desired encryption password:",
+            accept: "Save",
+            cancel: null);
+
         var key = Encoding.UTF8.GetBytes(password);
         config.EncryptionKey = Convert.ToBase64String(key);
 
@@ -106,7 +115,11 @@ public partial class MainPage
         if (string.IsNullOrWhiteSpace(config.Discord?.GuildId))
         {
             config.Discord ??= new DiscordConfiguration();
-            config.Discord.GuildId = await DisplayPromptAsync(title: "Guild", message: "Which guild should the bot use? Enter GuildId:");
+            config.Discord.GuildId = await DisplayPromptAsync(
+                title: "Guild",
+                message: "Which guild should the bot use? Enter GuildId:",
+                accept: "Save",
+                cancel: null);
         }
 
         var guild = _discordClient.GetGuild(ulong.Parse(config.Discord.GuildId));

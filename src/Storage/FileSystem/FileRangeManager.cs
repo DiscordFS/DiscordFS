@@ -134,7 +134,7 @@ public class FileRangeManager : IDisposable
 
     public void Cancel(string normalizedPath)
     {
-        RemoveRange(normalizedPath, rangeStart: 0, long.MaxValue);
+        RemoveRange(normalizedPath, rangeStart: 0, int.MaxValue);
     }
 
     public void RemoveRange(string normalizedPath, long rangeStart, long rangeEnd)

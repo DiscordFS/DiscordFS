@@ -178,6 +178,7 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
 
         try
         {
+            FileRangeManager?.Dispose();
             Unregister();
         }
         catch (Exception ex)

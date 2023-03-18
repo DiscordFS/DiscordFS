@@ -10,11 +10,11 @@ public interface IRemoteFileOperations : IDisposable
 
     public Task<GetFileInfoResult> GetFileInfoAsync(string relativeFileName, bool isDirectory);
 
-    public IFileListAsync GetNewFileList();
+    public IFileListStream GetNewFileList();
 
-    public IReadFileAsync GetNewReadFile();
+    public IReadFileStream GetNewReadFile();
 
-    public IWriteFileAsync GetNewWriteFile();
+    public IWriteFileStream GetNewWriteFile();
 
     public Task<MoveFileResult> MoveFileAsync(string relativeFileName, string relativeDestination, bool isDirectory);
 }

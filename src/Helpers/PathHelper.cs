@@ -38,7 +38,7 @@ public static class PathHelper
         if (callbackInfo.TargetPath.StartsWith(rootDirectory, StringComparison.OrdinalIgnoreCase))
         {
             var relativePath = callbackInfo.TargetPath.Remove(startIndex: 0, rootDirectory.Length);
-            return relativePath.TrimStart(char.Parse(s: "\\"));
+            return relativePath.TrimStart(Path.DirectorySeparatorChar);
         }
 
         return callbackInfo.TargetPath;
@@ -68,7 +68,7 @@ public static class PathHelper
 
         return fullPath
             .Remove(startIndex: 0, rootDirectory.Length + 1)
-            .TrimStart(char.Parse(s: "\\"));
+            .TrimStart(Path.DirectorySeparatorChar);
     }
 
     public static string GetRelativePath(in CF_CALLBACK_INFO callbackInfo, string rootDirectory)
@@ -81,7 +81,7 @@ public static class PathHelper
         if (callbackInfo.NormalizedPath.StartsWith(rootDirectory, StringComparison.OrdinalIgnoreCase))
         {
             var relativePath = callbackInfo.NormalizedPath.Remove(startIndex: 0, rootDirectory.Length);
-            return relativePath.TrimStart(char.Parse(s: "\\"));
+            return relativePath.TrimStart(Path.DirectorySeparatorChar);
         }
 
         return callbackInfo.NormalizedPath;

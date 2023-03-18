@@ -26,7 +26,12 @@ public class DiscordStorageProvider : BaseStorageProvider<DiscordStorageProvider
 
     protected override IRemoteFileSystemProvider CreateRemoteFileProvider()
     {
-        return new DiscordRemoteFileSystemProvider(_logger, FileRangeManager, Options, _discordClient, _httpClientFactory);
+        return new DiscordRemoteFileSystemProvider(
+            _logger,
+            FileRangeManager,
+            Options,
+            _discordClient,
+            _httpClientFactory);
     }
 
     protected override Task<string> GetInstanceIdAsync(DiscordStorageProviderOptions options)
