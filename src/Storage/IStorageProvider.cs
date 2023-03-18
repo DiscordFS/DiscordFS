@@ -1,4 +1,6 @@
-﻿namespace DiscordFS.Storage;
+﻿using DiscordFS.Storage.Synchronization;
+
+namespace DiscordFS.Storage;
 
 public interface IStorageProvider : IDisposable
 {
@@ -9,6 +11,8 @@ public interface IStorageProvider : IDisposable
     Task RegisterAsync(StorageProviderOptions options);
 
     void Unregister();
+
+    WindowsSynchronizationHandler WindowsSynchronizationHandler { get; }
 }
 
 public interface IStorageProvider<in TOptions> : IStorageProvider where TOptions : StorageProviderOptions

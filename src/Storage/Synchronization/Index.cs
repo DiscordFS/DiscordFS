@@ -5,6 +5,8 @@ using K4os.Compression.LZ4;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
+#pragma warning disable CS0618
+
 namespace DiscordFS.Storage.Synchronization;
 
 public class FileIndexCompareResult
@@ -13,14 +15,14 @@ public class FileIndexCompareResult
 
     public ICollection<IndexEntry> ModifiedFiles { get; }
 
-    public ICollection<IndexEntry> RemovedFiles { get; }
+    public ICollection<IndexEntry> DeletedFiles { get; }
 
     public FileIndexCompareResult(
-        ICollection<IndexEntry> removedFiles,
+        ICollection<IndexEntry> deletedFiles,
         ICollection<IndexEntry> addedFiles,
         ICollection<IndexEntry> modifiedFiles)
     {
-        RemovedFiles = removedFiles;
+        DeletedFiles = deletedFiles;
         AddedFiles = addedFiles;
         ModifiedFiles = modifiedFiles;
     }
@@ -32,10 +34,14 @@ public class Index
 
     public Index Clone()
     {
-        var index = new Index();
+        var index = new Index
+        {
+            Version = Version
+        };
+
         foreach (var entry in Entries.ToList())
         {
-            _entries.Add(entry.Clone());
+            index._entries.Add(entry.Clone());
         }
 
         return index;
@@ -49,6 +55,7 @@ public class Index
         [UsedImplicitly] private set { _entries = value.ToList(); }
     }
 
+    [Obsolete(message: "For serialization purposes only")]
     public Index()
     {
         _entries = new List<IndexEntry>();
@@ -72,7 +79,7 @@ public class Index
             .Where(file => !Entries.Any(x => PathHelper.Equals(x.RelativePath, file.RelativePath)))
             .ToList();
 
-        var removedFiles = Entries
+        var deletedFiles = Entries
             .Where(file => !other.Entries.Any(x => PathHelper.Equals(x.RelativePath, file.RelativePath)))
             .ToList();
 
@@ -83,7 +90,7 @@ public class Index
             .ToList();
 
         return new FileIndexCompareResult(
-            removedFiles,
+            deletedFiles,
             addedFiles,
             modifiedFiles
         );
@@ -174,13 +181,13 @@ public class Index
 
     public IndexEntry CreateDirectory(string relativePath)
     {
-        var directory = GetEntry(relativePath, EntryType.Directory);
-        if (directory != null)
+        if (relativePath == string.Empty)
         {
-            return directory;
+            throw new Exception(message: "Cannot create root directory");
         }
 
-        return CreateDirectoryInternal(relativePath, createSubdirectories: true);
+        var directory = GetEntry(relativePath, EntryType.Directory);
+        return directory ?? CreateDirectoryInternal(relativePath, createSubdirectories: true);
     }
 
     private IndexEntry CreateDirectoryInternal(string relativePath, bool createSubdirectories)
@@ -357,8 +364,38 @@ public class Index
 
     public IEnumerable<IndexEntry> EnumerateDirectory(string relativePath)
     {
+        if (relativePath == string.Empty)
+        {
+            return _entries.AsReadOnly();
+        }
+
         return _entries
             .Where(x => x.RelativePath.StartsWith(relativePath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static Index GetEmptyIndex()
+    {
+        // var minUtcTime = new DateTimeOffset(DateTime.UnixEpoch, TimeSpan.Zero);
+
+        return new Index
+        {
+            /*
+            _entries =
+            {
+                new IndexEntry
+                {
+                    RelativePath = string.Empty,
+                    Attributes = FileAttributes.Directory,
+                    Type = EntryType.Directory,
+                    Chunks = new List<IndexFileChunk>(),
+                    FileSize = 0,
+                    CreationTime = minUtcTime,
+                    LastAccessTime = minUtcTime,
+                    LastModificationTime = minUtcTime
+                }
+            }
+            */
+        };
     }
 }
 
@@ -396,7 +433,13 @@ public class IndexEntry
 
     public List<IndexFileChunk> Chunks { get; set; }
 
-    public string RelativePath { get; set; }
+    private string _relativePath;
+
+    public string RelativePath
+    {
+        get { return _relativePath; }
+        set { _relativePath = value ?? string.Empty; }
+    }
 
     public EntryType Type { get; set; }
 

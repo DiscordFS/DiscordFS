@@ -1,14 +1,15 @@
-﻿using DiscordFS.Storage.FileSystem.Operations;
+﻿using DiscordFS.Helpers;
+using DiscordFS.Storage.FileSystem.Operations;
 
 namespace DiscordFS.Storage.FileSystem;
 
 public interface IRemoteFileSystemProvider : IDisposable
 {
-    StorageProviderOptions Options { get; }
+    event AsyncEventHandler<FileProviderStateChangedEventArgs> StateChange;
 
-    public FileSystemProviderStatus Status { get; }
+    event AsyncEventHandler<FileChangedEventArgs> FileChange;
 
-    event EventHandler<FileProviderStateChangedEventArgs> StateChange;
+    FileSystemProviderStatus Status { get; }
 
     IRemoteFileOperations Operations { get; }
 

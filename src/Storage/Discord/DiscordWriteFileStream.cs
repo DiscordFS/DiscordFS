@@ -103,13 +103,21 @@ public class DiscordWriteFileStream : IWriteFileStream
 
         try
         {
+            var chunkCount = (int)Math.Ceiling((float)buffer.Length / MaxAttachmentSize);
+
             foreach (var data in buffer.Chunk(MaxAttachmentSize))
             {
+                var length = data.Length;
+                if (_chunkIndex == chunkCount - 1)
+                {
+                    length = buffer.Length % MaxAttachmentSize;
+                }
+
                 var chunk = FileChunk.CreateChunk(
                     _chunkIndex,
                     data,
                     offset: 0,
-                    data.Length,
+                    length,
                     _discordFs.Options.UseCompression);
 
                 await UploadChunkAsync(chunk);

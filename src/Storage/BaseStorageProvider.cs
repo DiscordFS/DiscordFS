@@ -7,8 +7,39 @@ using DiscordFS.Storage.FileSystem;
 using DiscordFS.Storage.Synchronization;
 using Microsoft.Extensions.Logging;
 using Vanara.PInvoke;
+using FileAttributes = System.IO.FileAttributes;
 
 namespace DiscordFS.Storage;
+
+public static class StorageProviderDictionary
+{
+    private static readonly Dictionary<string, IStorageProvider> _storageProviders = new();
+
+    public static void Register(string syncRootId, IStorageProvider storageProvider)
+    {
+        if (_storageProviders.ContainsKey(syncRootId))
+        {
+            _storageProviders.Remove(syncRootId);
+        }
+
+        _storageProviders.Add(syncRootId, storageProvider);
+    }
+
+    public static void Unregister(string syncRootId)
+    {
+        _storageProviders.Remove(syncRootId);
+    }
+
+    public static IStorageProvider GetForSyncRoot(string syncRootId)
+    {
+        if (!_storageProviders.ContainsKey(syncRootId))
+        {
+            return null;
+        }
+
+        return _storageProviders[syncRootId];
+    }
+}
 
 public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions> where TOptions : StorageProviderOptions
 {
@@ -20,14 +51,10 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
     private string _instanceId;
     private string _instanceName;
     private IRemoteFileSystemProvider _remoteFileSystemProvider;
-    private WindowsSynchronizationHandler _synchronizationHandler;
-
-    protected FileRangeManager FileRangeManager { get; private set; }
 
     protected BaseStorageProvider(ILogger logger)
     {
         _logger = logger;
-        FileRangeManager = new FileRangeManager();
     }
 
     public virtual async Task RegisterAsync(TOptions options)
@@ -53,6 +80,13 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
         {
             Directory.CreateDirectory(options.LocalPath);
         }
+
+        var directoryInfo = new DirectoryInfo(options.LocalPath);
+        directoryInfo.Attributes |=
+            FileAttributes.Directory
+            | FileAttributes.Archive
+            | FileAttributes.ReadOnly
+            | FileAttributes.ReparsePoint;
 
         var folder = await StorageFolder.GetFolderFromPathAsync(options.LocalPath);
         var exeLocation = GetType().Assembly.Location.Replace(oldValue: ".dll", newValue: ".exe");
@@ -89,6 +123,7 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
             }
         };
 
+        StorageProviderDictionary.Register(syncRootId, this);
         StorageProviderSyncRootManager.Register(syncRootInfo);
         BeginSynchronization();
     }
@@ -100,13 +135,12 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
             throw new ArgumentNullException(nameof(options));
         }
 
-        var castOptions = options as TOptions;
-        if (castOptions == null)
+        if (options is not TOptions storageProviderOptions)
         {
             throw new ArgumentException($"Invalid options type; expected {typeof(TOptions).Name}, got: {options.GetType().Name}");
         }
 
-        return RegisterAsync(castOptions);
+        return RegisterAsync(storageProviderOptions);
     }
 
     public virtual void Unregister()
@@ -131,9 +165,12 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
             // ignored
         }
 
+        StorageProviderDictionary.Unregister(syncRootId);
         CldApi.CfUnregisterSyncRoot(Options.LocalPath);
         Options = null;
     }
+
+    public WindowsSynchronizationHandler WindowsSynchronizationHandler { get; private set; }
 
     public virtual void BeginSynchronization()
     {
@@ -145,10 +182,10 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
             _remoteFileSystemProvider.Connect();
         }
 
-        if (_synchronizationHandler == null)
+        if (WindowsSynchronizationHandler == null)
         {
-            _synchronizationHandler = new WindowsSynchronizationHandler(FileRangeManager, _remoteFileSystemProvider, Options, _logger);
-            _synchronizationHandler.Connect();
+            WindowsSynchronizationHandler = new WindowsSynchronizationHandler(_remoteFileSystemProvider, Options, _logger);
+            WindowsSynchronizationHandler.Connect();
         }
     }
 
@@ -156,10 +193,10 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
     {
         EnsureNotDisposed();
 
-        if (_synchronizationHandler != null && disconnect)
+        if (WindowsSynchronizationHandler != null && disconnect)
         {
-            _synchronizationHandler.Dispose();
-            _synchronizationHandler = null;
+            WindowsSynchronizationHandler.Dispose();
+            WindowsSynchronizationHandler = null;
         }
 
         if (_remoteFileSystemProvider != null)
@@ -178,7 +215,6 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
 
         try
         {
-            FileRangeManager?.Dispose();
             Unregister();
         }
         catch (Exception ex)
@@ -187,6 +223,8 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
         }
 
         _disposed = true;
+        WindowsSynchronizationHandler?.Dispose();
+        _remoteFileSystemProvider?.Dispose();
     }
 
     protected abstract IRemoteFileSystemProvider CreateRemoteFileProvider();

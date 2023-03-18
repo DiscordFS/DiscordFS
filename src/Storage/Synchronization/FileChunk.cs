@@ -72,14 +72,14 @@ public class FileChunk
         var bodySize = br.ReadInt32();
         var body = br.ReadBytes(bodySize);
 
-        if (chunk.IsCompressed)
-        {
-            body = Decompress(body, fullSize);
-        }
-
         if (chunk.IsEncrypted)
         {
             body = Decrypt(body, encryptionKey);
+        }
+
+        if (chunk.IsCompressed)
+        {
+            body = Decompress(body, fullSize);
         }
 
         chunk.Data = body;
@@ -90,7 +90,7 @@ public class FileChunk
         {
             case HashAlgorithm.Md5:
                 var md5 = MD5.Create();
-                chunk.Hash = md5.ComputeHash(data);
+                chunk.Hash = md5.ComputeHash(body);
                 expectedHash = br.ReadBytes(count: 16);
                 break;
             default:
@@ -103,23 +103,6 @@ public class FileChunk
         }
 
         return chunk;
-    }
-
-    public static byte[] GetFileData(FileChunk[] chunks, string relativePath)
-    {
-        // Ensure chunks are ordered correctly
-        chunks = chunks.OrderBy(x => x.Index).ToArray();
-
-        var result = new byte[chunks.Sum(x => x.Data.Length)];
-        var index = 0;
-
-        foreach (var chunk in chunks)
-        {
-            Buffer.BlockCopy(chunk.Data, srcOffset: 0, result, index, chunk.Data.Length);
-            index += chunk.Data.Length;
-        }
-
-        return result;
     }
 
     public byte[] Serialize(byte[] encryptionKey = null)
@@ -194,7 +177,7 @@ public class FileChunk
 
 
     public static FileChunk CreateChunk(
-        int index,
+        int chunkIndex,
         byte[] data,
         int offset,
         int length,
@@ -206,7 +189,7 @@ public class FileChunk
         return new FileChunk(useCompression)
         {
             Data = newData,
-            Index = index,
+            Index = chunkIndex,
             HashAlgorithm = HashAlgorithm.Md5,
             Hash = Md5.ComputeHash(data)
         };

@@ -28,7 +28,6 @@ public class DiscordStorageProvider : BaseStorageProvider<DiscordStorageProvider
     {
         return new DiscordRemoteFileSystemProvider(
             _logger,
-            FileRangeManager,
             Options,
             _discordClient,
             _httpClientFactory);

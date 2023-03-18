@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks.Dataflow;
+using Windows.Storage.Provider;
 using Windows.Win32;
 using DiscordFS.Helpers;
 using DiscordFS.Platforms.Windows.Helpers;
@@ -30,7 +31,6 @@ public class WindowsSynchronizationHandler : IDisposable
     private static readonly TimeSpan LocalSyncTimerInterval = TimeSpan.FromSeconds(value: 30);
 
     private readonly CF_CALLBACK_REGISTRATION[] _callbackMappings;
-    private readonly ActionBlock<DeleteAction> _deleteQueue;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _fetchPlaceholdersCancellationTokens;
     private readonly ConcurrentDictionary<string, FailedDataSyncInfo> _failedDataQueue;
 
@@ -41,6 +41,12 @@ public class WindowsSynchronizationHandler : IDisposable
     private readonly ILogger _logger;
     private readonly StorageProviderOptions _options;
 
+    private readonly Timer _failedQueueTimer;
+    private readonly ActionBlock<ProcessChangedDataArgs> _changedDataQueue;
+    private readonly ActionBlock<SyncDataParam> _syncActionBlock;
+    private readonly ActionBlock<FileChangedEventArgs> _remoteChangesQueue;
+    private readonly ActionBlock<DeleteAction> _deleteQueue;
+
     private CancellationTokenSource _changedDataCancellationTokenSource;
     private CF_CONNECTION_KEY? _connectionKey;
     private bool _disposed;
@@ -49,12 +55,9 @@ public class WindowsSynchronizationHandler : IDisposable
 
     public bool SyncInProgress { get; protected set; }
 
-    private readonly Timer _failedQueueTimer;
-    private readonly ActionBlock<ProcessChangedDataArgs> _changedDataQueue;
-    private readonly ActionBlock<SyncDataParam> _syncActionBlock;
+    public StorageProviderState State { get; private set; }
 
     public WindowsSynchronizationHandler(
-        FileRangeManager fileRangeManager,
         IRemoteFileSystemProvider fileSystemProvider,
         StorageProviderOptions options,
         ILogger logger)
@@ -62,65 +65,73 @@ public class WindowsSynchronizationHandler : IDisposable
         _fileSystemProvider = fileSystemProvider;
         _options = options;
         _logger = logger;
-        _fileRangeManager = fileRangeManager;
+        _fileRangeManager = new FileRangeManager();
+
+        State = StorageProviderState.Offline;
+
+        _syncActionBlock = new ActionBlock<SyncDataParam>(SyncAction);
+        _remoteChangesQueue = new ActionBlock<FileChangedEventArgs>(ProcessRemoteFileChangedAsync);
         _deleteQueue = new ActionBlock<DeleteAction>(NotifyDeleteAction);
+        _changedDataQueue = new ActionBlock<ProcessChangedDataArgs>(ChangedDataAction);
+
         _failedDataQueue = new ConcurrentDictionary<string, FailedDataSyncInfo>();
 
-        _remoteChangedDataQueue = new LockableQueue<string>();
         _localChangedDataQueue = new LockableQueue<string>();
-        _fileSystemProvider.StateChange += OnFileSystemProviderStateChange;
+        _remoteChangedDataQueue = new LockableQueue<string>();
 
-        var registration = new CF_CALLBACK_REGISTRATION
-        {
-            Callback = CbFetchPlaceHolders,
-            Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_FETCH_PLACEHOLDERS
-        };
+        _fileSystemProvider.StateChange += OnFileSystemProviderStateChange;
+        _fileSystemProvider.FileChange += OnRemoteFileChange;
+
         _callbackMappings = new[]
         {
-            registration,
             new()
             {
-                Callback = CbCancelFetchPlaceHolders,
+                Callback = new SafeCfCallback(CbFetchPlaceHolders).Callback,
+                Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_FETCH_PLACEHOLDERS
+            },
+            new()
+            {
+                Callback = new SafeCfCallback(CbCancelFetchPlaceHolders).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_CANCEL_FETCH_PLACEHOLDERS
             },
             new()
             {
-                Callback = CbFetchData,
+                Callback = new SafeCfCallback(CbFetchData).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_FETCH_DATA
             },
             new()
             {
-                Callback = CbCancelFetchData,
+                Callback = new SafeCfCallback(CbCancelFetchData).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_CANCEL_FETCH_DATA
             },
             new()
             {
-                Callback = CbNotifyFileOpenCompletion,
+                Callback = new SafeCfCallback(CbNotifyFileOpenCompletion).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NOTIFY_FILE_OPEN_COMPLETION
             },
             new()
             {
-                Callback = CbNotifyFileCloseCompletion,
+                Callback = new SafeCfCallback(CbNotifyFileCloseCompletion).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NOTIFY_FILE_CLOSE_COMPLETION
             },
             new()
             {
-                Callback = CbNotifyDelete,
+                Callback = new SafeCfCallback(CbNotifyDelete).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NOTIFY_DELETE
             },
             new()
             {
-                Callback = CbNotifyDeleteCompletion,
+                Callback = new SafeCfCallback(CbNotifyDeleteCompletion).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NOTIFY_DELETE_COMPLETION
             },
             new()
             {
-                Callback = CbNotifyRename,
+                Callback = new SafeCfCallback(CbNotifyRename).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NOTIFY_RENAME
             },
             new()
             {
-                Callback = CbNotifyRenameCompletion,
+                Callback = new SafeCfCallback(CbNotifyRenameCompletion).Callback,
                 Type = CF_CALLBACK_TYPE.CF_CALLBACK_TYPE_NOTIFY_RENAME_COMPLETION
             },
             CF_CALLBACK_REGISTRATION.CF_CALLBACK_REGISTRATION_END
@@ -128,28 +139,41 @@ public class WindowsSynchronizationHandler : IDisposable
 
         _fetchPlaceholdersCancellationTokens = new ConcurrentDictionary<string, CancellationTokenSource>();
 
-        _failedQueueTimer = new Timer(FailedQueueTimerCallback, state: null, Timeout.Infinite, Timeout.Infinite);
-        _localSyncTimer = new Timer(LocalSyncTimerCallback, state: null, Timeout.Infinite, Timeout.Infinite);
+        _failedQueueTimer = new Timer(_ => AsyncHelper.RunSync(FailedQueueTimerCallback), state: null, Timeout.Infinite, Timeout.Infinite);
+        _localSyncTimer = new Timer(_ => AsyncHelper.RunSync(LocalSyncTimerCallback), state: null, Timeout.Infinite, Timeout.Infinite);
 
-        _syncActionBlock = new ActionBlock<SyncDataParam>(SyncAction);
-        _changedDataQueue =
-            new ActionBlock<ProcessChangedDataArgs>(ChangedDataAction, new ExecutionDataflowBlockOptions { MaxDegreeOfParallelism = 1 });
-
-        _ = FetchDataWorker();
+        StartFetchDataWorker();
     }
 
-    public void OnFileSystemProviderStateChange(object sender, FileProviderStateChangedEventArgs e)
+    private Task OnRemoteFileChange(object sender, FileChangedEventArgs e)
+    {
+        _ = Task.Factory.StartNew(async () =>
+        {
+            await Task.Delay(millisecondsDelay: 5000);
+            _remoteChangesQueue.Post(e);
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task OnFileSystemProviderStateChange(object sender, FileProviderStateChangedEventArgs e)
     {
         if (e.Status == FileSystemProviderStatus.Ready)
         {
             _localSyncTimer.Change(LocalSyncTimerInterval, LocalSyncTimerInterval);
             _failedQueueTimer.Change(FailedQueueTimerInterval, FailedQueueTimerInterval);
+
+            State = StorageProviderState.InSync;
         }
         else
         {
             _localSyncTimer.Change(Timeout.Infinite, Timeout.Infinite);
             _failedQueueTimer.Change(Timeout.Infinite, Timeout.Infinite);
+
+            State = StorageProviderState.Offline;
         }
+
+        return Task.CompletedTask;
     }
 
     private Task SyncAction(SyncDataParam data)
@@ -456,7 +480,7 @@ public class WindowsSynchronizationHandler : IDisposable
             CancellationToken.None);
     }
 
-    private async void LocalSyncTimerCallback(object state)
+    private async Task LocalSyncTimerCallback()
     {
         if (_fileSystemProvider.Status != FileSystemProviderStatus.Ready)
         {
@@ -479,7 +503,7 @@ public class WindowsSynchronizationHandler : IDisposable
         }
     }
 
-    private async void FailedQueueTimerCallback(object state)
+    private async Task FailedQueueTimerCallback()
     {
         if (_fileSystemProvider.Status != FileSystemProviderStatus.Ready)
         {
@@ -513,6 +537,7 @@ public class WindowsSynchronizationHandler : IDisposable
         {
             CfDisconnectSyncRoot(_connectionKey.Value);
             CfUpdateSyncProviderStatus(_connectionKey.Value, CF_SYNC_PROVIDER_STATUS.CF_PROVIDER_STATUS_TERMINATED);
+            State = StorageProviderState.Paused;
             _connectionKey = null;
         }
 
@@ -521,10 +546,12 @@ public class WindowsSynchronizationHandler : IDisposable
             RemoveFileWatcher();
         }
 
+        _fileRangeManager?.Dispose();
+
         _disposed = true;
     }
 
-    public async void CbNotifyRenameAsync(
+    public async Task CbNotifyRenameAsync(
         string relativeFileName,
         string relativeFileNameDestination,
         bool isDirectory,
@@ -567,9 +594,10 @@ public class WindowsSynchronizationHandler : IDisposable
             Flags = CF_OPERATION_ACK_RENAME_FLAGS.CF_OPERATION_ACK_RENAME_FLAG_NONE,
             CompletionStatus = status
         };
+
         var opParams = CF_OPERATION_PARAMETERS.Create(value);
 
-        CfExecute(opInfo, ref opParams);
+        CfExecuteWithLog(opInfo, ref opParams);
     }
 
     public void Connect()
@@ -584,6 +612,8 @@ public class WindowsSynchronizationHandler : IDisposable
         result.ThrowIfFailed();
 
         result = CfUpdateSyncProviderStatus(connectionKey, CF_SYNC_PROVIDER_STATUS.CF_PROVIDER_STATUS_IDLE);
+        State = StorageProviderState.InSync;
+
         result.ThrowIfFailed();
 
         _logger.LogDebug(message: "CF Provider registered");
@@ -670,10 +700,12 @@ public class WindowsSynchronizationHandler : IDisposable
         {
             case SyncMode.Local:
                 CfUpdateSyncProviderStatus(_connectionKey!.Value, CF_SYNC_PROVIDER_STATUS.CF_PROVIDER_STATUS_SYNC_INCREMENTAL);
+                State = StorageProviderState.Syncing;
                 break;
 
             case SyncMode.Full:
                 CfUpdateSyncProviderStatus(_connectionKey!.Value, CF_SYNC_PROVIDER_STATUS.CF_PROVIDER_STATUS_SYNC_FULL);
+                State = StorageProviderState.Syncing;
                 break;
         }
 
@@ -690,6 +722,7 @@ public class WindowsSynchronizationHandler : IDisposable
         try
         {
             SyncInProgress = true;
+
             await Task.Factory.StartNew(async () =>
             {
                 try
@@ -707,6 +740,7 @@ public class WindowsSynchronizationHandler : IDisposable
         {
             SyncInProgress = false;
             CfUpdateSyncProviderStatus(_connectionKey!.Value, CF_SYNC_PROVIDER_STATUS.CF_PROVIDER_STATUS_IDLE);
+            State = StorageProviderState.InSync;
         }
     }
 
@@ -988,6 +1022,8 @@ public class WindowsSynchronizationHandler : IDisposable
 
     private void CbCancelFetchData(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbCancelFetchData");
+
         var data = new DataActions
         {
             FileOffset = callbackparameters.Cancel.FetchData.FileOffset,
@@ -1009,6 +1045,8 @@ public class WindowsSynchronizationHandler : IDisposable
 
     private void CbFetchData(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbFetchData");
+
         var cancelFetch = _fileSystemProvider.Status != FileSystemProviderStatus.Ready;
         if (cancelFetch)
         {
@@ -1023,7 +1061,7 @@ public class WindowsSynchronizationHandler : IDisposable
             };
 
             var opParams = CF_OPERATION_PARAMETERS.Create(paramValue);
-            CfExecute(opInfo, ref opParams);
+            CfExecuteWithLog(opInfo, ref opParams);
             return;
         }
 
@@ -1053,8 +1091,17 @@ public class WindowsSynchronizationHandler : IDisposable
         _fileRangeManager.Add(data);
     }
 
+    private HRESULT CfExecuteWithLog(CF_OPERATION_INFO opInfo, ref CF_OPERATION_PARAMETERS opParams)
+    {
+        var result = CfExecute(opInfo, ref opParams);
+        _logger.LogDebug("CfExecute [" + result.Code + "], type: " + opInfo.Type);
+        return result;
+    }
+
     private void CbFetchPlaceHolders(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbFetchPlaceHolders");
+
         if (_disposed)
         {
             return;
@@ -1095,7 +1142,7 @@ public class WindowsSynchronizationHandler : IDisposable
             };
 
             var opParams = CF_OPERATION_PARAMETERS.Create(param);
-            CfExecute(opInfo, ref opParams);
+            CfExecuteWithLog(opInfo, ref opParams);
             return;
         }
 
@@ -1108,10 +1155,10 @@ public class WindowsSynchronizationHandler : IDisposable
             return cts;
         });
 
-        CbFetchPlaceHoldersAsync(relativePath, opInfo, cts.Token);
+        AsyncHelper.RunSync(() => CbFetchPlaceHoldersAsync(relativePath, opInfo, cts.Token));
     }
 
-    private async void CbFetchPlaceHoldersAsync(
+    private async Task CbFetchPlaceHoldersAsync(
         string relativePath,
         CF_OPERATION_INFO opInfo,
         CancellationToken cancellationToken)
@@ -1161,7 +1208,7 @@ public class WindowsSynchronizationHandler : IDisposable
         };
 
         var opParams = CF_OPERATION_PARAMETERS.Create(param);
-        var executeResult = CfExecute(opInfo, ref opParams);
+        var executeResult = CfExecuteWithLog(opInfo, ref opParams);
 
         _fetchPlaceholdersCancellationTokens.TryRemove(relativePath, out var _);
 
@@ -1259,6 +1306,44 @@ public class WindowsSynchronizationHandler : IDisposable
         return closeResult;
     }
 
+    private async Task ProcessRemoteFileChangedAsync(FileChangedEventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (e.ResyncSubDirectories)
+        {
+            await SyncDataAsync(SyncMode.Full, e.Placeholder != null
+                ? e.Placeholder.RelativeFileName
+                : string.Empty);
+        }
+        else
+        {
+            var localFullPath = PathHelper.GetAbsolutePath(e.Placeholder.RelativeFileName, _options.LocalPath);
+            AddFileToRemoteChangeQueue(localFullPath, ignoreLock: false);
+        }
+
+        _fileSystemProvider.FileChange -= OnRemoteFileChange;
+        _fileSystemProvider.StateChange -= OnFileSystemProviderStateChange;
+    }
+
+    private void AddFileToRemoteChangeQueue(string fullPath, bool ignoreLock)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (FileExcluder.IsExcludedFile(fullPath))
+        {
+            return;
+        }
+
+        _remoteChangedDataQueue.TryAdd(fullPath, ignoreLock);
+    }
+
     public static bool SetInSyncState(SafeFileHandle fileHandle, CF_IN_SYNC_STATE inSyncState)
     {
         var res = CfSetInSyncState(fileHandle, inSyncState, CF_SET_IN_SYNC_FLAGS.CF_SET_IN_SYNC_FLAG_NONE);
@@ -1280,6 +1365,8 @@ public class WindowsSynchronizationHandler : IDisposable
 
     private void CbNotifyDelete(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbNotifyDelete");
+
         if (_disposed)
         {
             return;
@@ -1291,16 +1378,21 @@ public class WindowsSynchronizationHandler : IDisposable
             IsDirectory = callbackparameters.Delete.Flags.HasFlag(CF_CALLBACK_DELETE_FLAGS.CF_CALLBACK_DELETE_FLAG_IS_DIRECTORY),
             RelativePath = PathHelper.GetRelativePath(callbackinfo, _options.LocalPath)
         };
+
         _deleteQueue.Post(item);
     }
 
     private void CbNotifyDeleteCompletion(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbNotifyDeleteCompletion");
+
         // do nothing
     }
 
     private void CbNotifyFileCloseCompletion(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbNotifyFileCloseCompletion");
+
         var path = PathHelper.GetAbsolutePath(callbackinfo, _options.LocalPath);
         _localChangedDataQueue.UnlockItem(path);
 
@@ -1309,12 +1401,16 @@ public class WindowsSynchronizationHandler : IDisposable
 
     private void CbNotifyFileOpenCompletion(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbNotifyFileOpenCompletion");
+
         var path = PathHelper.GetAbsolutePath(callbackinfo, _options.LocalPath);
         _localChangedDataQueue.LockItem(path);
     }
 
     private void CbNotifyRename(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbNotifyRename");
+
         if (_disposed)
         {
             return;
@@ -1325,11 +1421,13 @@ public class WindowsSynchronizationHandler : IDisposable
         var renameRelativePath = PathHelper.GetRelativePath(callbackparameters.Rename, _options.LocalPath);
         var isDirectory = callbackparameters.Rename.Flags.HasFlag(CF_CALLBACK_RENAME_FLAGS.CF_CALLBACK_RENAME_FLAG_IS_DIRECTORY);
 
-        CbNotifyRenameAsync(relativePath, renameRelativePath, isDirectory, opInfo);
+        AsyncHelper.RunSync(() => CbNotifyRenameAsync(relativePath, renameRelativePath, isDirectory, opInfo));
     }
 
     private void CbNotifyRenameCompletion(in CF_CALLBACK_INFO callbackinfo, in CF_CALLBACK_PARAMETERS callbackparameters)
     {
+        _logger.LogDebug(message: "CbNotifyRenameCompletion");
+
         // do nothing
     }
 
@@ -1431,8 +1529,8 @@ public class WindowsSynchronizationHandler : IDisposable
         }
 
         _changedDataCancellationTokenSource = new CancellationTokenSource();
-        _changedDataCancellationTokenSource.Token.Register(() => _localChangedDataQueue.Complete());
-        _changedDataCancellationTokenSource.Token.Register(() => _remoteChangedDataQueue.Complete());
+        _changedDataCancellationTokenSource.Token.Register(_localChangedDataQueue.Complete);
+        _changedDataCancellationTokenSource.Token.Register(_remoteChangedDataQueue.Complete);
 
         _ = CreateLocalChangedDataQueueTask();
         _ = CreateRemoteChangedDataQueueTask();
@@ -1505,6 +1603,7 @@ public class WindowsSynchronizationHandler : IDisposable
                         if (item != null)
                         {
                             var itemLock = _remoteChangedDataQueue.LockItemDisposable(item);
+
                             try
                             {
                                 await ProcessFileChanged(item, SyncMode.Full);
@@ -1580,7 +1679,7 @@ public class WindowsSynchronizationHandler : IDisposable
             };
             var opParams1 = CF_OPERATION_PARAMETERS.Create(value);
 
-            CfExecute(dat.OperationInfo, ref opParams1);
+            CfExecuteWithLog(dat.OperationInfo, ref opParams1);
             return;
         }
 
@@ -1611,7 +1710,7 @@ public class WindowsSynchronizationHandler : IDisposable
         var result = await _fileSystemProvider.Operations.DeleteFileAsync(dat.RelativePath, dat.IsDirectory);
         status = new NTStatus((uint)result.Status);
 
-        skip:
+    skip:
         var ackdelete = new CF_OPERATION_PARAMETERS.ACKDELETE
         {
             Flags = CF_OPERATION_ACK_DELETE_FLAGS.CF_OPERATION_ACK_DELETE_FLAG_NONE,
@@ -1619,7 +1718,7 @@ public class WindowsSynchronizationHandler : IDisposable
         };
         var opParams = CF_OPERATION_PARAMETERS.Create(ackdelete);
 
-        CfExecute(dat.OperationInfo, ref opParams);
+        CfExecuteWithLog(dat.OperationInfo, ref opParams);
     }
 
 
@@ -1638,12 +1737,17 @@ public class WindowsSynchronizationHandler : IDisposable
         }
     }
 
-    private Task FetchDataWorker()
+    private void StartFetchDataWorker()
     {
-        return Task.Factory.StartNew(async () =>
+        _ = Task.Factory.StartNew(async () =>
                 {
-                    while (!_fileRangeManager.CancellationToken.IsCancellationRequested)
+                    while (!_fileRangeManager.CancellationToken.IsCancellationRequested && !_disposed)
                     {
+                        if (_disposed)
+                        {
+                            return;
+                        }
+
                         var item = await _fileRangeManager.WaitTakeNextAsync().ConfigureAwait(continueOnCapturedContext: false);
                         if (_fileRangeManager.CancellationToken.IsCancellationRequested)
                         {
@@ -1673,7 +1777,7 @@ public class WindowsSynchronizationHandler : IDisposable
         EnsureNotDisposed();
 
         var relativePath = PathHelper.GetRelativePath(data.NormalizedPath, _options.LocalPath);
-        var targetFullPath = PathHelper.GetAbsolutePath(_options.LocalPath, relativePath);
+        var targetFullPath = PathHelper.GetAbsolutePath(relativePath, _options.LocalPath);
 
         try
         {
@@ -1705,7 +1809,7 @@ public class WindowsSynchronizationHandler : IDisposable
                 };
 
                 var opParams = CF_OPERATION_PARAMETERS.Create(tpParam);
-                CfExecute(opInfo, ref opParams);
+                CfExecuteWithLog(opInfo, ref opParams);
                 _fileRangeManager.Cancel(data.NormalizedPath);
                 return;
             }
@@ -1752,7 +1856,7 @@ public class WindowsSynchronizationHandler : IDisposable
                     };
 
                     var opParams = CF_OPERATION_PARAMETERS.Create(tpParam);
-                    CfExecute(opInfo, ref opParams);
+                    CfExecuteWithLog(opInfo, ref opParams);
 
                     _fileRangeManager.Cancel(data.NormalizedPath);
                     localPlaceholder.SetInSyncState(CF_IN_SYNC_STATE.CF_IN_SYNC_STATE_NOT_IN_SYNC);
@@ -1789,7 +1893,7 @@ public class WindowsSynchronizationHandler : IDisposable
                             };
 
                             var opParams = CF_OPERATION_PARAMETERS.Create(value);
-                            CfExecute(opInfo, ref opParams);
+                            CfExecuteWithLog(opInfo, ref opParams);
 
                             _fileRangeManager.Cancel(data.NormalizedPath);
                             return;
@@ -1836,7 +1940,7 @@ public class WindowsSynchronizationHandler : IDisposable
                                     };
 
                                     var opParams = CF_OPERATION_PARAMETERS.Create(tpParam);
-                                    CfExecute(opInfo, ref opParams);
+                                    CfExecuteWithLog(opInfo, ref opParams);
 
                                     //ret.ThrowIfFailed();
 

@@ -23,7 +23,7 @@
 
 
 using System.ComponentModel;
-using System.Diagnostics;
+using Serilog;
 using Vanara.PInvoke;
 using static Vanara.PInvoke.User32;
 using GC = System.GC;
@@ -209,7 +209,7 @@ public class TrayWindowMessageSink : IDisposable
                 break;
 
             default:
-                Debug.WriteLine("Unhandled NotifyIcon message ID: " + lParam);
+                Log.Warning("Unhandled NotifyIcon message ID: " + lParam);
                 break;
         }
     }

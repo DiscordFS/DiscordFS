@@ -21,8 +21,9 @@ public static class MauiProgram
         SetupSerilog();
 
         var builder = MauiApp.CreateBuilder();
-        AppBuilderExtensions.UseMauiCommunityToolkit(builder
-                .UseMauiApp<App>())
+        builder
+            .UseMauiApp<App>()
+            .UseMauiCommunityToolkit()
             .ConfigureFonts(fonts =>
             {
                 fonts.AddFont(filename: "OpenSans-Regular.ttf", alias: "OpenSansRegular");
@@ -105,13 +106,13 @@ public static class MauiProgram
 
         var logFilePath = Path.Combine(dir.FullName, $"{DateTime.Now:yyyy-MM-dd-HH-mm-ss}.log");
 
-        const string defaultConsoleLogTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}][{SourceContext}] {Message:lj}{NewLine}{Exception}";
+        const string defaultDebugLogTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}][{SourceContext}] {Message:lj}{NewLine}{Exception}";
         const string defaultFileLogTemplate =
             "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}][{SourceContext}] {Message:lj}{NewLine}{Exception}";
 
         Log.Logger = new LoggerConfiguration()
-            .WriteTo.Async(c => c.Console(LogEventLevel.Information, defaultConsoleLogTemplate))
-            .WriteTo.Async(c => c.File(logFilePath, LogEventLevel.Information, defaultFileLogTemplate))
+            .WriteTo.Debug(LogEventLevel.Debug, defaultDebugLogTemplate)
+            .WriteTo.Async(c => c.File(logFilePath, LogEventLevel.Debug, defaultFileLogTemplate))
             .CreateLogger();
     }
 }

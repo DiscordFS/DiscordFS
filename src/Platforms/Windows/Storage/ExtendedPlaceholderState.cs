@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using DiscordFS.Platforms.Windows.Helpers;
 using DiscordFS.Storage.FileSystem.Results;
 using Vanara.Extensions;
@@ -148,8 +147,6 @@ public class ExtendedPlaceholderState : IDisposable
             return new FileOperationResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_PINNED);
         }
 
-        Debug.WriteLine("DehydratePlaceholder " + FullPath, TraceLevel.Verbose);
-
         var res = CfDehydratePlaceholder(SafeFileHandleForCldApi, StartingOffset: 0, Length: -1, CF_DEHYDRATE_FLAGS.CF_DEHYDRATE_FLAG_NONE);
         if (res.Succeeded)
         {
@@ -157,7 +154,6 @@ public class ExtendedPlaceholderState : IDisposable
         }
         else
         {
-            Debug.WriteLine("DehydratePlaceholder FAILED" + FullPath + " Error: " + res.Code, TraceLevel.Warning);
             return new FileOperationResult((int)res);
         }
 
@@ -190,8 +186,6 @@ public class ExtendedPlaceholderState : IDisposable
         {
             return true;
         }
-
-        Debug.WriteLine("EnableOnDemandPopulation " + FullPath, TraceLevel.Verbose);
 
         using var fHandle = new SafeOpenFileWithOplock(FullPath, CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_NONE);
 
@@ -247,8 +241,6 @@ public class ExtendedPlaceholderState : IDisposable
             return true;
         }
 
-        Debug.WriteLine("EnableOnDemandPopulation " + FullPath, TraceLevel.Verbose);
-
         using var fHandle = new SafeOpenFileWithOplock(FullPath, CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_NONE);
         if (fHandle.IsInvalid)
         {
@@ -276,10 +268,6 @@ public class ExtendedPlaceholderState : IDisposable
             PlaceholderState |= CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PARTIAL
                                 | CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_PARTIALLY_ON_DISK;
         }
-        else
-        {
-            Debug.WriteLine("ConvertToPlaceholder FAILED: Error " + res.Code, TraceLevel.Warning);
-        }
 
         return res.Succeeded;
     }
@@ -296,17 +284,13 @@ public class ExtendedPlaceholderState : IDisposable
             return new FileOperationResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NOT_SUPPORTED);
         }
 
-        Debug.WriteLine("HydratePlaceholder " + FullPath, TraceLevel.Verbose);
-
         var res = CfHydratePlaceholder(SafeFileHandleForCldApi);
-
         if (res.Succeeded)
         {
             Reload();
             return new FileOperationResult();
         }
 
-        Debug.WriteLine("HydratePlaceholder FAILED " + FullPath + " Error: " + res.Code, TraceLevel.Warning);
         return new FileOperationResult((int)res);
     }
 
@@ -322,9 +306,6 @@ public class ExtendedPlaceholderState : IDisposable
             return new FileOperationResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_NOT_SUPPORTED);
         }
 
-        Debug.WriteLine("HydratePlaceholderAsync " + FullPath, TraceLevel.Info);
-
-
         var res = await Task.Run(() =>
             {
                 return CfHydratePlaceholder(SafeFileHandleForCldApi);
@@ -333,12 +314,10 @@ public class ExtendedPlaceholderState : IDisposable
 
         if (res.Succeeded)
         {
-            Debug.WriteLine("HydratePlaceholderAsync Completed: " + FullPath, TraceLevel.Verbose);
             Reload();
             return new FileOperationResult();
         }
 
-        Debug.WriteLine("HydratePlaceholderAsync FAILED " + FullPath + " Error: " + res.Code, TraceLevel.Warning);
         return new FileOperationResult((int)res);
     }
 
@@ -393,10 +372,6 @@ public class ExtendedPlaceholderState : IDisposable
         if (res.Succeeded)
         {
             Reload();
-        }
-        else
-        {
-            Debug.WriteLine("RevertPlaceholder FAILED: Error " + res.Code, TraceLevel.Warning);
         }
 
         return new FileOperationResult((int)res);
@@ -455,9 +430,7 @@ public class ExtendedPlaceholderState : IDisposable
             return true;
         }
 
-        Debug.WriteLine("SetPinState " + FullPath + " " + state, TraceLevel.Verbose);
         var res = CfSetPinState(SafeFileHandleForCldApi, state, CF_SET_PIN_FLAGS.CF_SET_PIN_FLAG_NONE);
-
         if (res.Succeeded)
         {
             //Reload();
@@ -469,10 +442,6 @@ public class ExtendedPlaceholderState : IDisposable
                 p.PinState = state;
                 _placeholderInfoStandard = p;
             }
-        }
-        else
-        {
-            Debug.WriteLine("SetPinState FAILED " + FullPath + " Error: " + res.Code, TraceLevel.Warning);
         }
 
         return res.Succeeded;

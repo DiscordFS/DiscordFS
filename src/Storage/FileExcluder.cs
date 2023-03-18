@@ -10,7 +10,7 @@ public static class FileExcluder
         @".*\\Thumbs\.db",
         @".*\\Desktop\.ini",
         @".*\.tmp",
-        @".*Recycle\.Bin.*",
+        @".*\$Recycle\.[Bb]in(.*)?",
         @".*\~.*"
     };
 

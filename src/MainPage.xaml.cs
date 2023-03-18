@@ -13,6 +13,7 @@ public partial class MainPage
     private DiscordSocketClient _discordClient;
     private ILogger<MainPage> _logger;
     private ILoggerFactory _loggerFactory;
+    private IDiscordStorageProvider _storageProvider;
 
     public MainPage()
     {
@@ -150,7 +151,7 @@ public partial class MainPage
         LoadingLayout.IsVisible = false;
     }
 
-    private async void OnAppNotSupported()
+    private async Task OnAppNotSupported()
     {
         await DisplayAlert(title: "OS not supported",
             message: "Your OS is not supported. Please upgrade to Windows 10 Fall Creators Update or newer.",
@@ -180,9 +181,7 @@ public partial class MainPage
 
         if (config.Discord?.Enabled ?? false)
         {
-            PrepareDiscordClient();
-
-            var storageProvider = Handler!.MauiContext!.Services.GetRequiredService<IDiscordStorageProvider>();
+            _storageProvider = Handler!.MauiContext!.Services.GetRequiredService<IDiscordStorageProvider>();
             var options = new DiscordStorageProviderOptions
             {
                 ProviderId = DiscordStorageProvider.ProviderId,
@@ -198,51 +197,17 @@ public partial class MainPage
 
             try
             {
-                await storageProvider.RegisterAsync(options);
+                await _storageProvider.RegisterAsync(options);
             }
             catch (NotSupportedException)
             {
-                OnAppNotSupported();
+                await OnAppNotSupported();
                 return;
             }
         }
 
         await _configurationManager.WriteConfigurationAsync();
         OnAppIsReady();
-    }
-
-    private void PrepareDiscordClient()
-    {
-        var logger = _loggerFactory.CreateLogger(categoryName: "Discord.NET");
-        _discordClient.Log += message =>
-        {
-            var formattedMessage = $"{message.Source}: {message.Message}";
-
-            switch (message.Severity)
-            {
-                case LogSeverity.Critical:
-                    logger.LogCritical(message.Exception, formattedMessage);
-                    break;
-                case LogSeverity.Error:
-                    logger.LogError(message.Exception, formattedMessage);
-                    break;
-                case LogSeverity.Warning:
-                    logger.LogWarning(message.Exception, formattedMessage);
-                    break;
-                case LogSeverity.Info:
-                    logger.LogInformation(message.Exception, formattedMessage);
-                    break;
-                case LogSeverity.Verbose:
-                    logger.LogTrace(message.Exception, formattedMessage);
-                    break;
-                case LogSeverity.Debug:
-                default:
-                    logger.LogDebug(message.Exception, formattedMessage);
-                    break;
-            }
-
-            return Task.CompletedTask;
-        };
     }
 
     private async Task ValidateDiscordTokenAndConnectAsync(string discordBotToken)
@@ -268,5 +233,15 @@ public partial class MainPage
             await _discordClient.StopAsync();
             throw new Exception(message: "Discord bot connection timeout");
         }
+    }
+
+    private void OnQuitButtonClick(object sender, EventArgs e)
+    {
+        _storageProvider.Dispose();
+        _ = Task.Factory.StartNew(async () =>
+        {
+            await Task.Delay(millisecondsDelay: 5000);
+            Application.Current?.Quit();
+        });
     }
 }

@@ -66,7 +66,7 @@ public class FilePlaceholder : BasicFileInfo
     public FilePlaceholder(IndexEntry indexEntry)
     {
         RelativeFileName = indexEntry.RelativePath;
-        FileSize = indexEntry.Attributes.HasFlag(FileAttributes.Directory)
+        FileSize = indexEntry.Type == EntryType.Directory
             ? 0
             : indexEntry.FileSize;
         FileAttributes = indexEntry.Attributes;

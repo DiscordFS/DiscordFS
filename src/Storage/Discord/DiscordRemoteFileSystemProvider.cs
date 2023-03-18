@@ -1,6 +1,8 @@
 ﻿using Discord;
 using Discord.Rest;
 using Discord.WebSocket;
+using DiscordFS.Helpers;
+using DiscordFS.Platforms.Windows.Storage;
 using DiscordFS.Storage.FileSystem;
 using DiscordFS.Storage.FileSystem.Operations;
 using Microsoft.Extensions.Logging;
@@ -14,10 +16,9 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
     public Index LastKnownRemoteIndex { get; protected set; }
 
-    StorageProviderOptions IRemoteFileSystemProvider.Options
-    {
-        get { return Options; }
-    }
+    public event AsyncEventHandler<FileChangedEventArgs> FileChange;
+
+    public event AsyncEventHandler<FileProviderStateChangedEventArgs> StateChange;
 
     public DiscordStorageProviderOptions Options { get; }
 
@@ -34,12 +35,10 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
     }
 
     private readonly DiscordSocketClient _discordClient;
+    private readonly Timer _fullResyncTimer;
+    private readonly ILogger _logger;
 
     public IHttpClientFactory HttpClientFactory { get; private set; }
-
-    // todo:
-    private readonly FileRangeManager _fileRangeManager;
-    private readonly ILogger _logger;
 
     private CancellationTokenSource _cancellationTokenSource;
 
@@ -51,21 +50,37 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
     private SocketGuild _guild;
     private ulong _indexMessageId;
     private bool _isReady;
-    private DateTimeOffset? _lastIndexEditTimestamp;
+
+    private readonly List<DateTimeOffset> _pendingEdits;
 
     public DiscordRemoteFileSystemProvider(
         ILogger logger,
-        FileRangeManager fileRangeManager,
         DiscordStorageProviderOptions options,
         DiscordSocketClient discordClient,
         IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
-        _fileRangeManager = fileRangeManager;
-        Options = options;
         _discordClient = discordClient;
+        _pendingEdits = new List<DateTimeOffset>();
+
+        Options = options;
         HttpClientFactory = httpClientFactory;
         Operations = new DiscordRemoteFileOperations(this);
+        _fullResyncTimer = new Timer(FullResyncTimerCallback, state: null, Timeout.Infinite, Timeout.Infinite);
+    }
+
+    private void FullResyncTimerCallback(object state)
+    {
+        _ = Task.Factory.StartNew(PerformFullSynchronizationAsync);
+    }
+
+    private Task PerformFullSynchronizationAsync()
+    {
+        return FileChange.InvokeAsync(this, new FileChangedEventArgs
+        {
+            ChangeType = FileChangeEventType.All,
+            ResyncSubDirectories = true
+        });
     }
 
     public void Dispose()
@@ -87,8 +102,6 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         _disposed = true;
     }
 
-    public event EventHandler<FileProviderStateChangedEventArgs> StateChange;
-
     public IRemoteFileOperations Operations { get; }
 
     public void Connect()
@@ -106,10 +119,10 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         _discordClient.Connected += OnDiscordConnected;
         _discordClient.Disconnected += OnDiscordDisconnected;
 
-        Task.Run(EnsureChannelsExistAsync);
+        _ = Task.Run(ConnectAsync);
     }
 
-    private async Task EnsureChannelsExistAsync()
+    private async Task ConnectAsync()
     {
         EnsureNotDisposed();
 
@@ -119,7 +132,7 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
         await FindIndexMessageAsync();
 
-        _ = Task.Run(PerformInitialSynchronizationAsync);
+        _ = Task.Factory.StartNew(PerformInitialSynchronizationAsync);
     }
 
     private async Task FindIndexMessageAsync()
@@ -127,11 +140,12 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         foreach (var message in await DbChannel.GetPinnedMessagesAsync(
                      DiscordHelper.CreateDefaultOptions(_cancellationTokenSource.Token)))
         {
-            if (IsIndexDbMessage(message))
+            if (!IsIndexDbMessage(message))
             {
-                _indexMessageId = message.Id;
-                _lastIndexEditTimestamp = message.EditedTimestamp;
+                continue;
             }
+
+            _indexMessageId = message.Id;
         }
     }
 
@@ -199,17 +213,15 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         await PerformInitialSynchronizationAsync();
     }
 
-    private Task OnDiscordDisconnected(Exception arg)
+    private async Task OnDiscordDisconnected(Exception arg)
     {
         EnsureNotDisposed();
 
-        SetReady(ready: false);
+        await SetReadyAsync(ready: false);
 
         _indexMessageId = 0;
         LastKnownRemoteIndex = null;
-        _lastIndexEditTimestamp = null;
-
-        return Task.CompletedTask;
+        _pendingEdits.Clear();
     }
 
     private async Task OnMessageUpdated(Cacheable<IMessage, ulong> cache, SocketMessage message, ISocketMessageChannel channel)
@@ -224,8 +236,9 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
             return;
         }
 
-        if (message.EditedTimestamp == _lastIndexEditTimestamp)
+        if (_pendingEdits.Count > 0)
         {
+            _pendingEdits.RemoveAt(_pendingEdits.Count - 1);
             return;
         }
 
@@ -246,16 +259,15 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
             if (_indexMessageId == 0)
             {
                 await PostIndexMessageAsync();
-                SetReady(ready: true);
+                await SetReadyAsync(ready: true);
                 return;
             }
 
             var indexMessage = await DbChannel.GetMessageAsync(_indexMessageId,
                 options: DiscordHelper.CreateDefaultOptions(_cancellationTokenSource.Token));
 
-            SetReady(ready: true);
-
             await RetrieveIndexFileAsync(indexMessage);
+            await SetReadyAsync(ready: true);
         }
         catch (Exception ex)
         {
@@ -267,7 +279,7 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
     {
         var indexFile = buildIndex
             ? Index.BuildForDirectory(Options.LocalPath)
-            : new Index();
+            : Index.GetEmptyIndex();
 
         var bytes = indexFile.Serialize();
 
@@ -286,24 +298,85 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         await message.PinAsync();
 
         _indexMessageId = message.Id;
-        _lastIndexEditTimestamp = message.EditedTimestamp;
         LastKnownRemoteIndex = indexFile;
     }
 
-    private void SetReady(bool ready)
+    private async Task SetReadyAsync(bool ready)
     {
         _isReady = ready;
-        StateChange?.Invoke(this, new FileProviderStateChangedEventArgs(Status));
+
+        if (_isReady)
+        {
+            _fullResyncTimer.Change(TimeSpan.FromSeconds(value: 2), TimeSpan.FromMinutes(value: 3));
+        }
+        else
+        {
+            _fullResyncTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        }
+
+        await StateChange.InvokeAsync(this, new FileProviderStateChangedEventArgs(Status));
     }
 
     private async Task RetrieveIndexFileAsync(IMessage message)
     {
+        EnsureNotDisposed();
+
         var attachment = message.Attachments.First(x => x.Filename.Equals(IndexFileName, StringComparison.OrdinalIgnoreCase));
         var client = HttpClientFactory.CreateClient(name: "DiscordFS");
         var data = await client.GetByteArrayAsync(attachment.Url, _cancellationTokenSource.Token);
 
-        var remoteIndex = Index.Deserialize(data);
-        LastKnownRemoteIndex = remoteIndex;
+        var fullSync = LastKnownRemoteIndex == null;
+        LastKnownRemoteIndex = Index.Deserialize(data);
+
+        if (!fullSync)
+        {
+            await CheckForChangedEntriesAsync();
+        }
+    }
+
+    private async Task CheckForChangedEntriesAsync()
+    {
+        if (LastKnownRemoteIndex == null)
+        {
+            return;
+        }
+
+        var localIndex = Index.BuildForDirectory(Options.LocalPath);
+        var remoteIndex = LastKnownRemoteIndex;
+
+        var result = localIndex.CompareTo(remoteIndex);
+        foreach (var entry in result.AddedFiles)
+        {
+            await FileChange.InvokeAsync(this, new FileChangedEventArgs
+            {
+                ChangeType = FileChangeEventType.Created,
+                OldRelativePath = entry.RelativePath,
+                Placeholder = new FilePlaceholder(entry),
+                ResyncSubDirectories = false
+            });
+        }
+
+        foreach (var entry in result.DeletedFiles)
+        {
+            await FileChange.InvokeAsync(this, new FileChangedEventArgs
+            {
+                ChangeType = FileChangeEventType.Deleted,
+                OldRelativePath = entry.RelativePath,
+                Placeholder = new FilePlaceholder(entry),
+                ResyncSubDirectories = false
+            });
+        }
+
+        foreach (var entry in result.ModifiedFiles)
+        {
+            await FileChange.InvokeAsync(this, new FileChangedEventArgs
+            {
+                ChangeType = FileChangeEventType.Modified,
+                OldRelativePath = entry.RelativePath,
+                Placeholder = new FilePlaceholder(entry),
+                ResyncSubDirectories = false
+            });
+        }
     }
 
     public async Task WriteIndexAsync(Index index)
@@ -343,7 +416,22 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
             });
         });
 
+        await Task.Delay(millisecondsDelay: 1500);
+
+        // Refetch message to get the new edit timestamp
+        message = (RestUserMessage)await DbChannel.GetMessageAsync(_indexMessageId,
+            options: DiscordHelper.CreateDefaultOptions(_cancellationTokenSource.Token));
+
         LastKnownRemoteIndex = index;
-        _lastIndexEditTimestamp = message.EditedTimestamp;
+
+        _pendingEdits.Add(message.EditedTimestamp!.Value);
+
+        // Remove after 30 seconds if we didnt get edit message event
+        _ = Task.Delay(TimeSpan.FromSeconds(value: 30))
+            .ContinueWith(_ =>
+            {
+                _pendingEdits.Remove(message.EditedTimestamp!.Value);
+                return Task.CompletedTask;
+            });
     }
 }
