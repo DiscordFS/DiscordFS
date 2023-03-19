@@ -83,30 +83,50 @@ public class ReadFileStream : IReadFileStream
 
         try
         {
-            var currentPos = 0L;
             readResult.BytesRead = 0;
 
-            // todo: Parallel.ForEachAsync(_entry.Chunks)
-
+            //This peace of code will calculate the offset for blockcopy
+            //The calculation is based on input and chunk size
+            var tempOffsetCalc = 0;
+            var preCalculateReaddOffset = new Dictionary<string, int>();
             foreach (var chunkInfo in _entry.Chunks)
             {
-                if (currentPos >= offset && currentPos <= offset + count)
+                if (tempOffsetCalc >= offset && tempOffsetCalc < offset + count)
                 {
-                    var chunk = await DownloadChunkAsync(chunkInfo);
-                    var size = chunk.Data.Length;
+                    preCalculateReaddOffset.Add(chunkInfo.Url, tempOffsetCalc + offsetBuffer);
+                }
+                
+                tempOffsetCalc += (int)chunkInfo.Size;//asked about and seems to be safe max 8mb
+            }
 
+
+            await Parallel.ForEachAsync(_entry.Chunks, new ParallelOptions
+            {
+                CancellationToken = _openAsyncParams.CancellationToken,
+                MaxDegreeOfParallelism = -1// todo: change this value and maybe set it in a global way
+            }, async (chunkInfo, _) =>
+            {
+                if (!preCalculateReaddOffset.TryGetValue(chunkInfo.Url, out var chunkBufferOffset))
+                {
+                    //if not found it must be ignored
+                    return;
+                }
+
+                var chunk = await DownloadChunkAsync(chunkInfo);
+                var size = chunk.Data.Length;
+
+                lock (buffer)
+                {
                     Buffer.BlockCopy(
                         chunk.Data,
                         srcOffset: 0,
                         buffer,
-                        readResult.BytesRead + offsetBuffer,
+                        chunkBufferOffset,
                         size);
 
                     readResult.BytesRead += size;
                 }
-
-                currentPos += chunkInfo.Size;
-            }
+            });
         }
         catch (Exception ex)
         {
@@ -122,7 +142,7 @@ public class ReadFileStream : IReadFileStream
 
         var client = _discordFs.HttpClientFactory.CreateClient(name: "DiscordFS");
         var data = await client.GetByteArrayAsync(chunk.Url, _openAsyncParams.CancellationToken);
-        return FileChunk.Deserialize(data);
+        return FileChunk.Deserialize(data, _discordFs.Options.EncryptionKey);
     }
 
     public Task<ReadFileCloseResult> CloseAsync()
