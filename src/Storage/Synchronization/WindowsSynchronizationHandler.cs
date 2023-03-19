@@ -249,7 +249,11 @@ public class WindowsSynchronizationHandler : IDisposable
                         if (localPlaceHolder.PlaceholderState.HasFlag(CF_PLACEHOLDER_STATE.CF_PLACEHOLDER_STATE_IN_SYNC))
                         {
                             // File remotely deleted if it was in sync.
-                            MoveToRecycleBin(localPlaceHolder);
+                            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                            {
+                                //This function is windows exclusive
+                                MoveToRecycleBin(localPlaceHolder);
+                            }
                             return;
                         }
 
@@ -1295,8 +1299,13 @@ public class WindowsSynchronizationHandler : IDisposable
         {
             if (localPlaceHolder.LastWriteTime != closeResult.Placeholder.LastWriteTime)
             {
-                PInvoke.SetFileTime(fStream.SafeFileHandle, lpCreationTime: null, lpLastAccessTime: null,
-                    closeResult.Placeholder.LastWriteTime.ToFileTimeStruct());
+                //This is exclusive to windows5.1.2600
+                if (OperatingSystem.IsWindowsVersionAtLeast(major: 5, minor: 1, build: 2600))
+                {
+                    PInvoke.SetFileTime(fStream.SafeFileHandle, lpCreationTime: null, lpLastAccessTime: null,
+                        closeResult.Placeholder.LastWriteTime.ToFileTimeStruct());
+
+                }
             }
         }
 
@@ -1724,10 +1733,7 @@ public class WindowsSynchronizationHandler : IDisposable
 
     private void RemoveFileWatcher()
     {
-        if (_changedDataCancellationTokenSource != null)
-        {
-            _changedDataCancellationTokenSource.Cancel();
-        }
+        _changedDataCancellationTokenSource?.Cancel();
 
         if (_watcher != null)
         {
