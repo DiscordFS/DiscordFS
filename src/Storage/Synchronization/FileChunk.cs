@@ -41,10 +41,10 @@ public class FileChunk
 
     private static readonly MD5 Md5 = MD5.Create();
 
-    public FileChunk(bool useCompression, byte[] encryptionKey = null)
+    public FileChunk(bool useCompression, bool isEncrypted)
     {
         IsCompressed = useCompression;
-        IsEncrypted = encryptionKey != null;
+        IsEncrypted = isEncrypted;
     }
 
     public FileChunk() { }
@@ -89,8 +89,7 @@ public class FileChunk
         switch (chunk.HashAlgorithm)
         {
             case HashAlgorithm.Md5:
-                var md5 = MD5.Create();
-                chunk.Hash = md5.ComputeHash(body);
+                chunk.Hash = Md5.ComputeHash(body);
                 expectedHash = br.ReadBytes(count: 16);
                 break;
             default:
@@ -117,8 +116,7 @@ public class FileChunk
         bw.Write(IsCompressed);
         bw.Write(IsEncrypted);
 
-        using var md5 = MD5.Create();
-        var hash = md5.ComputeHash(Data);
+        var hash = Md5.ComputeHash(Data);
         var originalSize = Data.Length;
 
         var body = IsCompressed
@@ -166,12 +164,18 @@ public class FileChunk
     private static byte[] Decrypt(byte[] body, byte[] encryptionKey)
     {
         // todo: implement me
+        // Recommended algorithm AES
+        // Since key is known to program, IV should be random generated on every encryption
+        // Since IV should be random it need to be received to decrypt
         return body;
     }
 
-    private static byte[] Encrypt(byte[] body, byte[] encryptionKe)
+    private static byte[] Encrypt(byte[] body, byte[] encryptionKey)
     {
         // todo: implement me
+        // Recommended algorithm AES
+        // Since key is known to program, IV should be random generated on every encryption
+        // Since IV should be random it should be send on encrypt
         return body;
     }
 
@@ -181,12 +185,13 @@ public class FileChunk
         byte[] data,
         int offset,
         int length,
-        bool useCompression)
+        bool useCompression,
+        bool isEncrypted)
     {
         var newData = new byte[length];
         Buffer.BlockCopy(data, srcOffset: 0, newData, offset, length);
 
-        return new FileChunk(useCompression)
+        return new FileChunk(useCompression, isEncrypted)
         {
             Data = newData,
             Index = chunkIndex,
