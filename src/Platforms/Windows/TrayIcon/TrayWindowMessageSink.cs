@@ -209,6 +209,8 @@ public class TrayWindowMessageSink : IDisposable
                 break;
 
             default:
+                // todo: implemnt 123(0x7B) and 1024(0x400)
+                // First one is my right click and second is my left click (single click)
                 Log.Warning("Unhandled NotifyIcon message ID: " + lParam);
                 break;
         }
