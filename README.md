@@ -22,6 +22,7 @@ ToDo before v1.0 release:
 - [x] [ReadFileAsync / WriteFileAsync / GetFileListAsync Discord based implementation](https://github.com/Trojaner/DiscordFS/issues/7)
 - [ ] Fix [random crashes](https://github.com/DiscordFS/DiscordFS/issues/11)
 - [ ] Fix [moving files](https://github.com/DiscordFS/DiscordFS/issues/20)
+- [ ] Fix [renaming files](https://github.com/DiscordFS/DiscordFS/issues/15)
 - [ ] Fix [placeholders for directories](https://github.com/DiscordFS/DiscordFS/issues/21)
 - [ ] [Encrypt index.db](https://github.com/DiscordFS/DiscordFS/issues/23)
 - [ ] [Display current sync status in Windows Explorer](https://github.com/Trojaner/DiscordFS/issues/2)
