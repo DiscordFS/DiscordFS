@@ -481,5 +481,5 @@ public class IndexFileChunk
 {
     public string Url { get; set; }
 
-    public long Size { get; set; }
+    public int Size { get; set; }
 }

@@ -83,34 +83,52 @@ public class ReadFileStream : IReadFileStream
 
         try
         {
-            var currentPos = 0L;
             readResult.BytesRead = 0;
+            var position = 0L;
 
             // todo: Parallel.ForEachAsync(_entry.Chunks)
 
             foreach (var chunkInfo in _entry.Chunks)
             {
-                if (currentPos >= offset && currentPos <= offset + count)
+                var size = chunkInfo.Size;
+                if (position + size < offset)
                 {
-                    var chunk = await DownloadChunkAsync(chunkInfo);
-                    var size = chunk.Data.Length;
-
-                    if (currentPos + size > count)
-                    {
-                        size = count - (int)currentPos;
-                    }
-
-                    Buffer.BlockCopy(
-                        chunk.Data,
-                        srcOffset: 0,
-                        buffer,
-                        readResult.BytesRead + offsetBuffer,
-                        size);
-
-                    readResult.BytesRead += size;
+                    position += size;
+                    continue;
                 }
 
-                currentPos += chunkInfo.Size;
+                // first chunk
+                if (position < offset)
+                {
+                    position = offset;
+                }
+
+                // last chunk
+                else if (position + size > offset + count)
+                {
+                    size = count - readResult.BytesRead;
+                }
+
+                var chunk = await DownloadChunkAsync(chunkInfo);
+                Buffer.BlockCopy(
+                    chunk.Data,
+                    srcOffset: 0,
+                    buffer,
+                    readResult.BytesRead + offsetBuffer,
+                    size);
+
+                readResult.BytesRead += size;
+                position += size;
+
+                if (readResult.BytesRead >= count)
+                {
+                    break;
+                }
+            }
+
+            if (readResult.BytesRead != count)
+            {
+                throw new Exception(message: "Failed to read all requested bytes");
             }
         }
         catch (Exception ex)

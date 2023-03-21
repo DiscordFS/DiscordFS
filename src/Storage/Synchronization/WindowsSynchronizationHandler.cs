@@ -10,7 +10,6 @@ using DiscordFS.Helpers;
 using DiscordFS.Platforms.Windows.Helpers;
 using DiscordFS.Platforms.Windows.Storage;
 using DiscordFS.Storage.Actions;
-using DiscordFS.Storage.Discord;
 using DiscordFS.Storage.FileSystem;
 using DiscordFS.Storage.FileSystem.Operations;
 using DiscordFS.Storage.FileSystem.Results;
@@ -1094,7 +1093,9 @@ public class WindowsSynchronizationHandler : IDisposable
     private HRESULT CfExecuteWithLog(CF_OPERATION_INFO opInfo, ref CF_OPERATION_PARAMETERS opParams)
     {
         var result = CfExecute(opInfo, ref opParams);
-        _logger.LogDebug("CfExecute [" + result.Code + "], type: " + opInfo.Type);
+        _logger.LogDebug("CfExecute [" + result.Code + "], type: " + opInfo.Type + (result.Succeeded
+            ? "SUCCESS"
+            : "FAIL"));
         return result;
     }
 
