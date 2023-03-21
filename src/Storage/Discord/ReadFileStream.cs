@@ -95,6 +95,11 @@ public class ReadFileStream : IReadFileStream
                     var chunk = await DownloadChunkAsync(chunkInfo);
                     var size = chunk.Data.Length;
 
+                    if (currentPos + size > count)
+                    {
+                        size = count - (int)currentPos;
+                    }
+
                     Buffer.BlockCopy(
                         chunk.Data,
                         srcOffset: 0,
