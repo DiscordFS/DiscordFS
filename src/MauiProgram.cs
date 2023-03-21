@@ -5,6 +5,7 @@ using Discord;
 using Discord.WebSocket;
 using DiscordFS.Configuration;
 using DiscordFS.Storage.Discord;
+using Microsoft.Extensions.Logging;
 using Microsoft.Maui.LifecycleEvents;
 using Polly;
 using Polly.RateLimit;

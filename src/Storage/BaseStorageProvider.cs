@@ -97,7 +97,7 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
             Id = syncRootId,
             ProviderId = options.ProviderId,
             Version = options.ProviderVersion,
-            DisplayNameResource = $"Discord.FS - {_instanceName}",
+            DisplayNameResource = $"DiscordFS - {_instanceName}",
             AllowPinning = true,
             Path = folder,
             HardlinkPolicy = StorageProviderHardlinkPolicy.None,

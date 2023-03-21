@@ -9,7 +9,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 
 		<!-- Display name -->
-		<ApplicationTitle>Discord.FS</ApplicationTitle>
+		<ApplicationTitle>DiscordFS</ApplicationTitle>
 
 		<!-- App Identifier -->
 		<ApplicationId>com.github.trojaner.discordfs</ApplicationId>
