@@ -104,6 +104,11 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
     public IRemoteFileOperations Operations { get; }
 
+    public int ChunkSize
+    {
+        get { return 8 * 1024 * 1024; }
+    }
+
     public void Connect()
     {
         EnsureNotDisposed();

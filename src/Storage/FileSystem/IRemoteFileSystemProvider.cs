@@ -13,5 +13,7 @@ public interface IRemoteFileSystemProvider : IDisposable
 
     IRemoteFileOperations Operations { get; }
 
+    int ChunkSize { get; }
+
     void Connect();
 }

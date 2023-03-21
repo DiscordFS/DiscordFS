@@ -10,6 +10,7 @@ using DiscordFS.Helpers;
 using DiscordFS.Platforms.Windows.Helpers;
 using DiscordFS.Platforms.Windows.Storage;
 using DiscordFS.Storage.Actions;
+using DiscordFS.Storage.Discord;
 using DiscordFS.Storage.FileSystem;
 using DiscordFS.Storage.FileSystem.Operations;
 using DiscordFS.Storage.FileSystem.Results;
@@ -24,7 +25,6 @@ namespace DiscordFS.Storage.Synchronization;
 public class WindowsSynchronizationHandler : IDisposable
 {
     // 2 MB chunk size for File Download / Upload
-    private const int ChunkSize = 1024 * 1024 * 2;
     private const int StackSize = 1024 * 512;
 
     private static readonly TimeSpan FailedQueueTimerInterval = TimeSpan.FromSeconds(value: 30);
@@ -1070,9 +1070,9 @@ public class WindowsSynchronizationHandler : IDisposable
 
         if (offset + length == callbackparameters.FetchData.OptionalFileOffset)
         {
-            if (length < ChunkSize)
+            if (length < _fileSystemProvider.ChunkSize)
             {
-                length = Math.Min(ChunkSize, callbackparameters.FetchData.OptionalLength + length);
+                length = Math.Min(_fileSystemProvider.ChunkSize, callbackparameters.FetchData.OptionalLength + length);
             }
         }
 
@@ -1257,7 +1257,7 @@ public class WindowsSynchronizationHandler : IDisposable
 
         var localPlaceHolder = new FilePlaceholder(fullPath);
         var currentOffset = 0L;
-        var buffer = new byte[ChunkSize];
+        var buffer = new byte[_fileSystemProvider.ChunkSize];
 
         using var transferKey = new SafeTransferKey(fStream.SafeFileHandle);
 
@@ -1271,7 +1271,7 @@ public class WindowsSynchronizationHandler : IDisposable
         });
         openResult.ThrowOnFailure();
 
-        var readBytes = await fStream.ReadAsync(buffer, offset: 0, ChunkSize, ctx);
+        var readBytes = await fStream.ReadAsync(buffer, offset: 0, _fileSystemProvider.ChunkSize, ctx);
         while (readBytes > 0)
         {
             ctx.ThrowIfCancellationRequested();
@@ -1282,7 +1282,7 @@ public class WindowsSynchronizationHandler : IDisposable
             writeResult.ThrowOnFailure();
 
             currentOffset += readBytes;
-            readBytes = await fStream.ReadAsync(buffer, offset: 0, ChunkSize, ctx);
+            readBytes = await fStream.ReadAsync(buffer, offset: 0, _fileSystemProvider.ChunkSize, ctx);
         }
 
         var closeResult = await writeFileAsync.CloseAsync(ctx.IsCancellationRequested == false);
@@ -1864,7 +1864,7 @@ public class WindowsSynchronizationHandler : IDisposable
                 }
 
                 var stackBuffer = new byte[StackSize];
-                var buffer = new byte[ChunkSize];
+                var buffer = new byte[_fileSystemProvider.ChunkSize];
 
                 var minRangeStart = long.MaxValue;
                 long totalRead = 0;
@@ -1877,7 +1877,7 @@ public class WindowsSynchronizationHandler : IDisposable
 
                     var currentOffset = currentRangeStart;
 
-                    var readLength = (int)Math.Min(currentRangeEnd - currentOffset, ChunkSize);
+                    var readLength = (int)Math.Min(currentRangeEnd - currentOffset, _fileSystemProvider.ChunkSize);
                     if (readLength > 0 && ctx.IsCancellationRequested == false)
                     {
                         var readResult = await fetchFile.ReadAsync(buffer, offsetBuffer: 0, currentOffset, readLength);

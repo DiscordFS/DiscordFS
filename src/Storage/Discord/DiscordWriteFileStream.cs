@@ -9,8 +9,6 @@ namespace DiscordFS.Storage.Discord;
 
 public class DiscordWriteFileStream : IWriteFileStream
 {
-    public const int MaxAttachmentSize = 1024 * 1024 * 8;
-
     private OpenAsyncParams _params;
     private readonly DiscordRemoteFileSystemProvider _discordFs;
 
@@ -103,14 +101,15 @@ public class DiscordWriteFileStream : IWriteFileStream
 
         try
         {
-            var chunkCount = (int)Math.Ceiling((float)buffer.Length / MaxAttachmentSize);
+            var maxAttachmentSize = _discordFs.ChunkSize;
+            var chunkCount = (int)Math.Ceiling((float)buffer.Length / maxAttachmentSize);
 
-            foreach (var data in buffer.Chunk(MaxAttachmentSize))
+            foreach (var data in buffer.Chunk(maxAttachmentSize))
             {
                 var length = data.Length;
                 if (_chunkIndex == chunkCount - 1)
                 {
-                    length = buffer.Length % MaxAttachmentSize;
+                    length = buffer.Length % maxAttachmentSize;
                 }
 
                 var chunk = FileChunk.CreateChunk(
