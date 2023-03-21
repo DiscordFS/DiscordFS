@@ -161,24 +161,47 @@ public class FileChunk
         return result;
     }
 
-    private static byte[] Decrypt(byte[] body, byte[] encryptionKey)
-    {
-        // todo: implement me
-        // Recommended algorithm AES
-        // Since key is known to program, IV should be random generated on every encryption
-        // Since IV should be random it need to be received to decrypt
-        return body;
-    }
-
     private static byte[] Encrypt(byte[] body, byte[] encryptionKey)
     {
-        // todo: implement me
-        // Recommended algorithm AES
-        // Since key is known to program, IV should be random generated on every encryption
-        // Since IV should be random it should be send on encrypt
-        return body;
+        using var aes = Aes.Create();
+        aes.Key = encryptionKey;
+        aes.Mode = CipherMode.CBC;
+        aes.GenerateIV();
+        var iv = aes.IV;
+
+        using var encryptor = aes.CreateEncryptor();
+        using var memoryStream = new MemoryStream();
+        using (var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write))
+            cryptoStream.Write(body, offset: 0, body.Length);
+
+        var encryptedBody = memoryStream.ToArray();
+        var encryptedBodyWithIv = new byte[iv.Length + encryptedBody.Length];
+        Buffer.BlockCopy(iv, srcOffset: 0, encryptedBodyWithIv, dstOffset: 0, iv.Length);
+        Buffer.BlockCopy(encryptedBody, srcOffset: 0, encryptedBodyWithIv, iv.Length, encryptedBody.Length);
+        return encryptedBodyWithIv;
     }
 
+    private static byte[] Decrypt(byte[] body, byte[] encryptionKey)
+    {
+        using var aes = Aes.Create();
+        aes.Key = encryptionKey;
+        aes.Mode = CipherMode.CBC;
+
+
+        var iv = new byte[aes.BlockSize / 8];
+        Buffer.BlockCopy(body, srcOffset: 0, iv, dstOffset: 0, iv.Length);
+        aes.IV = iv;
+        var encryptedBody = new byte[body.Length - iv.Length];
+        Buffer.BlockCopy(body, iv.Length, encryptedBody, dstOffset: 0, encryptedBody.Length);
+
+        using var decryptor = aes.CreateDecryptor();
+        using var memoryStream = new MemoryStream();
+        using (var cryptoStream = new CryptoStream(memoryStream, decryptor, CryptoStreamMode.Write))
+            cryptoStream.Write(encryptedBody, offset: 0, encryptedBody.Length);
+
+        var decryptedBody = memoryStream.ToArray();
+        return decryptedBody;
+    }
 
     public static FileChunk CreateChunk(
         int chunkIndex,

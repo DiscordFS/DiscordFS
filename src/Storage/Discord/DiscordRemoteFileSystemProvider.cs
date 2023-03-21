@@ -104,6 +104,11 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
     public IRemoteFileOperations Operations { get; }
 
+    public int ChunkSize
+    {
+        get { return 8 * 1024 * 1024; }
+    }
+
     public void Connect()
     {
         EnsureNotDisposed();
@@ -260,6 +265,10 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
             {
                 await PostIndexMessageAsync();
                 await SetReadyAsync(ready: true);
+
+                _ = Task.Delay(TimeSpan.FromSeconds(value: 5))
+                    .ContinueWith(async _ => await PerformFullSynchronizationAsync());
+
                 return;
             }
 
@@ -307,7 +316,7 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
         if (_isReady)
         {
-            _fullResyncTimer.Change(TimeSpan.FromSeconds(value: 2), TimeSpan.FromMinutes(value: 3));
+            _fullResyncTimer.Change(TimeSpan.FromMinutes(value: 3), TimeSpan.FromMinutes(value: 3));
         }
         else
         {

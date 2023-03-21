@@ -62,7 +62,7 @@ public class ReadFileStream : IReadFileStream
         return Task.FromResult(openResult);
     }
 
-    public async Task<ReadFileReadResult> ReadAsync(byte[] buffer, int offsetBuffer, long offset, int count)
+    public async Task<ReadFileReadResult> ReadAsync(byte[] buffer, int offsetBuffer, int offset, int count)
     {
         if (_disposed)
         {
@@ -85,18 +85,40 @@ public class ReadFileStream : IReadFileStream
         {
             readResult.BytesRead = 0;
 
-            //This peace of code will calculate the offset for blockcopy
+            //This peace of code will calculate the offset for all chunks used in blockcopy
             //The calculation is based on input and chunk size
-            var tempOffsetCalc = 0;
-            var preCalculateReaddOffset = new Dictionary<string, int>();
+            var currentPosition = 0;
+            var preCalculateOffsetSize = new Dictionary<string, (int, int)>();//(offset, size)
             foreach (var chunkInfo in _entry.Chunks)
             {
-                if (tempOffsetCalc >= offset && tempOffsetCalc < offset + count)
+                var size = chunkInfo.Size;
+                var nextPosition = currentPosition + size;
+
+                // chunks outside the bound, ignoring
+                if (nextPosition <= offset)
                 {
-                    preCalculateReaddOffset.Add(chunkInfo.Url, tempOffsetCalc + offsetBuffer);
+                    currentPosition = nextPosition;
+                    continue;
                 }
-                
-                tempOffsetCalc += (int)chunkInfo.Size;//asked about and seems to be safe max 8mb
+
+                // first chunk
+                if (currentPosition < offset)
+                {
+                    size = nextPosition - offset;
+                    currentPosition = offset;
+                }
+
+                // Dont use else if in case of the count be less then a single chunk
+                // last chunk
+                var maxPosition = offset + count;
+                if (nextPosition > maxPosition)//same as (currentPosition + size >offset + count )
+                {
+                    //same as (offset + count - currentPosition)
+                    size = maxPosition - currentPosition;
+                }
+
+                preCalculateOffsetSize.Add(chunkInfo.Url, (currentPosition, size));
+                currentPosition += size;
             }
 
 
@@ -106,7 +128,7 @@ public class ReadFileStream : IReadFileStream
                 MaxDegreeOfParallelism = -1// todo: change this value and maybe set it in a global way
             }, async (chunkInfo, _) =>
             {
-                if (!preCalculateReaddOffset.TryGetValue(chunkInfo.Url, out var chunkBufferOffset))
+                if (!preCalculateOffsetSize.TryGetValue(chunkInfo.Url, out (int offset, int size) chunkOffsetSize))
                 {
                     //if not found it must be ignored
                     return;
@@ -121,12 +143,17 @@ public class ReadFileStream : IReadFileStream
                         chunk.Data,
                         srcOffset: 0,
                         buffer,
-                        chunkBufferOffset,
-                        size);
+                        chunkOffsetSize.offset + offsetBuffer,
+                        chunkOffsetSize.size);
 
                     readResult.BytesRead += size;
                 }
             });
+
+            if (readResult.BytesRead != count)
+            {
+                throw new Exception(message: "Failed to read all requested bytes");
+            }
         }
         catch (Exception ex)
         {

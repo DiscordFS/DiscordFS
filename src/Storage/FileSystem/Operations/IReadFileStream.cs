@@ -8,5 +8,5 @@ public interface IReadFileStream : IDisposable, IAsyncDisposable
 
     public Task<ReadFileOpenResult> OpenAsync(OpenAsyncParams e);
 
-    public Task<ReadFileReadResult> ReadAsync(byte[] buffer, int offsetBuffer, long offset, int count);
+    public Task<ReadFileReadResult> ReadAsync(byte[] buffer, int offsetBuffer, int offset, int count);
 }

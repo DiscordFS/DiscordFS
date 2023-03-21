@@ -8,6 +8,7 @@ Use Discord as your personal free cloud storage
 ## Current State
 **PROJECT IS WORK IN PROGRESS / NOT READY FOR USE YET**
 
+ToDo before v1.0 release:  
 - [x] Synchronize data from client to Discord
 - [x] [Synchronize data from Discord to client](https://github.com/Trojaner/DiscordFS/issues/10)
 - [x] Windows Explorer on-demand files integration
@@ -15,14 +16,17 @@ Use Discord as your personal free cloud storage
 - [x] File index database
 - [x] File serialization & chunking
 - [x] File compression
-- [ ] [Display current sync status in Windows Explorer](https://github.com/Trojaner/DiscordFS/issues/2)
-- [ ] [File encryption](https://github.com/Trojaner/DiscordFS/issues/1)
-- [ ] [File history / versioning](https://github.com/Trojaner/DiscordFS/issues/3)
+- [x] [File encryption](https://github.com/Trojaner/DiscordFS/issues/1)
 - [x] [Report sync download/upload progress to Windows](https://github.com/Trojaner/DiscordFS/issues/4)
 - [x] [Read / write files using streams instead of byte arrays to reduce memory usage](https://github.com/Trojaner/DiscordFS/issues/5)
-- [ ] [Proper UI (initial set-up, sync status, etc.)](https://github.com/Trojaner/DiscordFS/issues/6)
 - [x] [ReadFileAsync / WriteFileAsync / GetFileListAsync Discord based implementation](https://github.com/Trojaner/DiscordFS/issues/7)
-- [ ] [Integrate other cloud storage providers (like WebDAV, S3, Azure, etc) & rename project](https://github.com/Trojaner/DiscordFS/issues/9)
+- [ ] Fix [random crashes](https://github.com/DiscordFS/DiscordFS/issues/11)
+- [ ] Fix [moving files](https://github.com/DiscordFS/DiscordFS/issues/20)
+- [ ] Fix [renaming files](https://github.com/DiscordFS/DiscordFS/issues/15)
+- [ ] Fix [placeholders for directories](https://github.com/DiscordFS/DiscordFS/issues/21)
+- [ ] [Encrypt index.db](https://github.com/DiscordFS/DiscordFS/issues/23)
+- [ ] [Display current sync status in Windows Explorer](https://github.com/Trojaner/DiscordFS/issues/2)
+- [ ] [Proper UI (initial set-up, sync status, etc.)](https://github.com/Trojaner/DiscordFS/issues/6)
 - [ ] [Auto-run on system startup](https://github.com/Trojaner/DiscordFS/issues/8)
 
 ## Quick Start
