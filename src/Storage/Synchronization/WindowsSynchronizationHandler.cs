@@ -187,6 +187,8 @@ public class WindowsSynchronizationHandler : IDisposable
         SyncMode syncMode,
         CancellationToken ctx)
     {
+        _logger.LogDebug("ProcessChangedDataAsync2: " + fullPath);
+
         try
         {
             var relativePath = PathHelper.GetRelativePath(fullPath, _options.LocalPath);
@@ -253,6 +255,7 @@ public class WindowsSynchronizationHandler : IDisposable
                                 //This function is windows exclusive
                                 MoveToRecycleBin(localPlaceHolder);
                             }
+
                             return;
                         }
 
@@ -1001,6 +1004,8 @@ public class WindowsSynchronizationHandler : IDisposable
         SyncMode syncMode,
         CancellationToken ctx)
     {
+        _logger.LogDebug("ProcessChangedDataAsync: " + fullPath);
+
         var item = new ProcessChangedDataArgs
         {
             SyncMode = syncMode,
@@ -1008,6 +1013,7 @@ public class WindowsSynchronizationHandler : IDisposable
             LocalPlaceHolder = localPlaceHolder,
             RemotePlaceholder = remotePlaceholder
         };
+
         return _changedDataQueue.SendAsync(item, ctx);
     }
 
@@ -1305,7 +1311,6 @@ public class WindowsSynchronizationHandler : IDisposable
                 {
                     PInvoke.SetFileTime(fStream.SafeFileHandle, lpCreationTime: null, lpLastAccessTime: null,
                         closeResult.Placeholder.LastWriteTime.ToFileTimeStruct());
-
                 }
             }
         }

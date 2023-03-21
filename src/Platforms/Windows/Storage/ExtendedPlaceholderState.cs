@@ -105,7 +105,10 @@ public class ExtendedPlaceholderState : IDisposable
             return new FileOperationResult(CloudFilterNTStatus.STATUS_SUCCESS);
         }
 
-        using var fHandle = new SafeOpenFileWithOplock(FullPath, CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_EXCLUSIVE);
+        using var fHandle = new SafeOpenFileWithOplock(FullPath,
+            IsDirectory
+                ? CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_NONE
+                : CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_EXCLUSIVE);
 
         if (fHandle.IsInvalid)
         {
@@ -345,7 +348,9 @@ public class ExtendedPlaceholderState : IDisposable
             };
         }
 
-        using var fHandle = new SafeOpenFileWithOplock(FullPath, CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_EXCLUSIVE);
+        using var fHandle = new SafeOpenFileWithOplock(FullPath, IsDirectory
+            ? CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_NONE
+            : CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_EXCLUSIVE);
         if (fHandle.IsInvalid)
         {
             return new FileOperationResult(CloudFilterNTStatus.STATUS_CLOUD_FILE_IN_USE);
@@ -469,7 +474,9 @@ public class ExtendedPlaceholderState : IDisposable
 
         var res = new FileOperationResult();
 
-        using var fHandle = new SafeOpenFileWithOplock(FullPath, CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_EXCLUSIVE);
+        using var fHandle = new SafeOpenFileWithOplock(FullPath, IsDirectory
+            ? CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_NONE
+            : CF_OPEN_FILE_FLAGS.CF_OPEN_FILE_FLAG_EXCLUSIVE);
 
         if (fHandle.IsInvalid)
         {

@@ -15,9 +15,10 @@ public class SafeOpenFileWithOplock : IDisposable
 
     private bool _disposedValue;
 
-    public SafeOpenFileWithOplock(string fullPath, CF_OPEN_FILE_FLAGS Flags)
+    public SafeOpenFileWithOplock(string fullPath, CF_OPEN_FILE_FLAGS flags)
     {
-        CfOpenFileWithOplock(fullPath, Flags, out _handle);
+        var result = CfOpenFileWithOplock(fullPath, flags, out _handle);
+        result.ThrowIfFailed();
     }
 
     public void Dispose()
