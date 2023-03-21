@@ -1,4 +1,6 @@
-﻿using System.Text;
+﻿using System.Runtime.Intrinsics.Arm;
+using System.Security.Cryptography;
+using System.Text;
 using Discord;
 using Discord.WebSocket;
 using DiscordFS.Configuration;
@@ -12,7 +14,6 @@ public partial class MainPage
     private IAppConfigurationManager _configurationManager;
     private DiscordSocketClient _discordClient;
     private ILogger<MainPage> _logger;
-    private ILoggerFactory _loggerFactory;
     private IDiscordStorageProvider _storageProvider;
 
     public MainPage()
@@ -102,6 +103,8 @@ public partial class MainPage
             cancel: null);
 
         var key = Encoding.UTF8.GetBytes(password);
+        key = SHA256.HashData(key);
+
         config.EncryptionKey = Convert.ToBase64String(key);
 
         await DisplayAlert(title: "Encryption",
@@ -163,7 +166,6 @@ public partial class MainPage
     {
         _configurationManager = Handler!.MauiContext!.Services.GetRequiredService<IAppConfigurationManager>();
         _discordClient = (DiscordSocketClient)Handler.MauiContext.Services.GetRequiredService<IDiscordClient>();
-        _loggerFactory = Handler.MauiContext.Services.GetRequiredService<ILoggerFactory>();
         _logger = Handler.MauiContext.Services.GetRequiredService<ILogger<MainPage>>();
 
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>

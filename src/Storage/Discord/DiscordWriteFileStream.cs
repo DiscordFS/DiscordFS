@@ -63,7 +63,7 @@ public class DiscordWriteFileStream : IWriteFileStream
 
         var chunkDataSize = chunk.Data.Length;
 
-        using var ms = new MemoryStream(chunk.Serialize());
+        using var ms = new MemoryStream(chunk.Serialize(_discordFs.Options.EncryptionKey));
         ms.Seek(offset: 0, SeekOrigin.Begin);
 
         var fileName = Guid.NewGuid().ToString(format: "N");
@@ -117,7 +117,8 @@ public class DiscordWriteFileStream : IWriteFileStream
                     data,
                     offset: 0,
                     length,
-                    _discordFs.Options.UseCompression);
+                    _discordFs.Options.UseCompression,
+                    _discordFs.Options.EncryptionKey != null);
 
                 await UploadChunkAsync(chunk);
                 _chunkIndex++;

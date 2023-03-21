@@ -2,5 +2,6 @@
 
 public enum HashAlgorithm : byte
 {
-    Md5
+    Md5,
+    Sha256
 }
