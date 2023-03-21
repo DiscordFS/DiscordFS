@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using K4os.Compression.LZ4;
+
 using HashAlgorithm = DiscordFS.Helpers.HashAlgorithm;
 
 namespace DiscordFS.Storage.Synchronization;
@@ -38,8 +39,6 @@ public class FileChunk
     public bool IsEncrypted { get; set; }
 
     public int Index { get; set; }
-
-    private static readonly MD5 Md5 = MD5.Create();
 
     public FileChunk(bool useCompression, bool isEncrypted)
     {
@@ -89,9 +88,15 @@ public class FileChunk
         switch (chunk.HashAlgorithm)
         {
             case HashAlgorithm.Md5:
-                chunk.Hash = Md5.ComputeHash(body);
+                chunk.Hash = MD5.HashData(body);
                 expectedHash = br.ReadBytes(count: 16);
                 break;
+
+            case HashAlgorithm.Sha256:
+                chunk.Hash = SHA256.HashData(body);
+                expectedHash = br.ReadBytes(count: 16);
+                break;
+
             default:
                 throw new Exception($"Unknown hash algorithm ID: {(int)chunk.HashAlgorithm}");
         }
@@ -116,7 +121,7 @@ public class FileChunk
         bw.Write(IsCompressed);
         bw.Write(IsEncrypted);
 
-        var hash = Md5.ComputeHash(Data);
+        var hash = MD5.HashData(Data);
         var originalSize = Data.Length;
 
         var body = IsCompressed
@@ -132,7 +137,7 @@ public class FileChunk
         bw.Write(body.Length);
         bw.Write(body);
 
-        bw.Write((byte)HashAlgorithm.Md5);
+        bw.Write((byte)HashAlgorithm);
         bw.Write(hash);
 
         bw.Flush();
@@ -219,7 +224,7 @@ public class FileChunk
             Data = newData,
             Index = chunkIndex,
             HashAlgorithm = HashAlgorithm.Md5,
-            Hash = Md5.ComputeHash(data)
-        };
+            Hash = MD5.HashData(data)
+    };
     }
 }

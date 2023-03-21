@@ -103,8 +103,7 @@ public partial class MainPage
             cancel: null);
 
         var key = Encoding.UTF8.GetBytes(password);
-        using (var sha2 = SHA256.Create())
-            key = sha2.ComputeHash(key);
+        key = SHA256.HashData(key);
 
         config.EncryptionKey = Convert.ToBase64String(key);
 
