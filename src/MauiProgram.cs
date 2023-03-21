@@ -111,8 +111,9 @@ public static class MauiProgram
             "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}][{SourceContext}] {Message:lj}{NewLine}{Exception}";
 
         Log.Logger = new LoggerConfiguration()
-            .WriteTo.Debug(LogEventLevel.Debug, defaultDebugLogTemplate)
-            .WriteTo.Async(c => c.File(logFilePath, LogEventLevel.Debug, defaultFileLogTemplate))
+            .MinimumLevel.Verbose()
+            .WriteTo.Debug(LogEventLevel.Verbose, defaultDebugLogTemplate)
+            .WriteTo.Async(c => c.File(logFilePath, LogEventLevel.Verbose, defaultFileLogTemplate))
             .CreateLogger();
     }
 }
