@@ -163,18 +163,45 @@ public class FileChunk
         return result;
     }
 
+    private static byte[] Encrypt(byte[] body, byte[] encryptionKey)
+    {
+        using var aes = Aes.Create();
+        aes.Key = encryptionKey;
+        aes.Mode = CipherMode.CBC;
+        aes.GenerateIV();
+        var iv = aes.IV;
+
+        using var encryptor = aes.CreateEncryptor();
+        using var memoryStream = new MemoryStream();
+        using var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write);
+        cryptoStream.Write(body, 0, body.Length);
+        cryptoStream.Close();
+        var encryptedBody = memoryStream.ToArray();
+        var encryptedBodyWithIv = new byte[iv.Length + encryptedBody.Length];
+        Buffer.BlockCopy(iv, 0, encryptedBodyWithIv, 0, iv.Length);
+        Buffer.BlockCopy(encryptedBody, 0, encryptedBodyWithIv, iv.Length, encryptedBody.Length);
+        return encryptedBodyWithIv;
+    }
+
     private static byte[] Decrypt(byte[] body, byte[] encryptionKey)
     {
-        // todo: implement me
-        return body;
-    }
+        using var aes = Aes.Create();
+        aes.Key = encryptionKey;
+        aes.Mode = CipherMode.CBC;
+        var iv = new byte[aes.BlockSize / 8];
+        Buffer.BlockCopy(body, 0, iv, 0, iv.Length);
+        aes.IV = iv;
+        var encryptedBody = new byte[body.Length - iv.Length];
+        Buffer.BlockCopy(body, iv.Length, encryptedBody, 0, encryptedBody.Length);
 
-    private static byte[] Encrypt(byte[] body, byte[] encryptionKe)
-    {
-        // todo: implement me
-        return body;
+        using var decryptor = aes.CreateDecryptor();
+        using var memoryStream = new MemoryStream();
+        using var cryptoStream = new CryptoStream(memoryStream, decryptor, CryptoStreamMode.Write);
+        cryptoStream.Write(encryptedBody, 0, encryptedBody.Length);
+        cryptoStream.Close();
+        var decryptedBody = memoryStream.ToArray();
+        return decryptedBody;
     }
-
 
     public static FileChunk CreateChunk(
         int chunkIndex,
