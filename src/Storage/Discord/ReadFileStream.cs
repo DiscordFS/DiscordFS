@@ -62,7 +62,7 @@ public class ReadFileStream : IReadFileStream
         return Task.FromResult(openResult);
     }
 
-    public async Task<ReadFileReadResult> ReadAsync(byte[] buffer, int offsetBuffer, long chunksOffset, int count)
+    public async Task<ReadFileReadResult> ReadAsync(byte[] buffer, int offsetBuffer, long offset, int count)
     {
         if (_disposed)
         {
@@ -85,43 +85,58 @@ public class ReadFileStream : IReadFileStream
         {
             readResult.BytesRead = 0;
 
-            //This peace of code will calculate the offset for all chunks used in blockcopy
-            //The calculation is based on input and chunk size
-            var currentChunkPos = 0L;
+
+            //Almost every chunk starts on offset 0 except the first chunk of course
+            //Also chunks out of bound need to be ignored
+            //For last the ned to calculate the size of the chunk to save
+            //And also the buffer offset
+
+            //We start by creating a reading pointer and increment it with size
+            //If reading pointer + size < offset that means chunk is out of bound
+            //Also if pointer > offset + count that means chunk is out of bound
+
+            //bufferOffset starts with offsetBuffer and incremeants by the size to match the buffer entry point
+            //For last chunkOffset it is only use for the first chunk to match offset value if not match the begging of the first chunk position
+
+            var readPosition = 0L;
             var bufferOffset = offsetBuffer;
-            var preCalculateOffsetSize = new Dictionary<string, (int, int)>();//(offset, size)
+            var preCalculateOffsetsSizes = new Dictionary<string, (int, int, int)>();//(chunkOffset, bufferOffset, size)
 
             foreach (var chunkInfo in _entry.Chunks)
             {
-                var size = chunkInfo.Size;
-
                 // chunks outside the bound, ignoring
-                if (currentChunkPos + size <= chunksOffset)
+                var maxPosition = offset + count;
+                if (readPosition >= maxPosition)
                 {
-                    currentChunkPos += size;
                     continue;
                 }
 
-                // first chunk
-                if (currentChunkPos < chunksOffset)
+                var size = chunkInfo.Size;
+                if (readPosition + size <= offset)
                 {
-                    size = (int)(currentChunkPos + size - currentChunkPos);
-                    currentChunkPos = chunksOffset;
+                    readPosition += size;
+                    continue;
                 }
 
-                // last chunk
-                var maxPosition = chunksOffset + count;
-                if (currentChunkPos + size > maxPosition)
+                // first chunk offset
+                var chunkOffset = 0;
+                if (readPosition < offset)
+                {
+                    size = (int)(readPosition + size - offset);
+                    chunkOffset = (int)(offset - readPosition);
+                }
+
+                // last chunk offset
+                if (readPosition + size > maxPosition)
                 {
                     //same as (offset + count - currentPosition)
-                    size = (int)(maxPosition - currentChunkPos);
+                    size = (int)(maxPosition - readPosition);
                 }
 
-                preCalculateOffsetSize.Add(chunkInfo.Url, (bufferOffset, size));
+                preCalculateOffsetsSizes.Add(chunkInfo.Url, (chunkOffset, bufferOffset, size));
                 bufferOffset += size;
-                currentChunkPos += size;
+                readPosition += size;
             }
-
 
             await Parallel.ForEachAsync(_entry.Chunks, new ParallelOptions
             {
@@ -129,7 +144,7 @@ public class ReadFileStream : IReadFileStream
                 MaxDegreeOfParallelism = -1// todo: change this value and maybe set it in a global way
             }, async (chunkInfo, _) =>
             {
-                if (!preCalculateOffsetSize.TryGetValue(chunkInfo.Url, out (int offset, int size) chunkOffsetSize))
+                if (!preCalculateOffsetsSizes.TryGetValue(chunkInfo.Url, out (int chunkOffset, int bufferOffset, int size) offsetsSizes))
                 {
                     //if not found it must be ignored
                     return;
@@ -142,10 +157,10 @@ public class ReadFileStream : IReadFileStream
                 {
                     Buffer.BlockCopy(
                         chunk.Data,
-                        srcOffset: 0,
+                        offsetsSizes.chunkOffset,                        
                         buffer,
-                        chunkOffsetSize.offset,
-                        chunkOffsetSize.size);
+                        offsetsSizes.bufferOffset,
+                        offsetsSizes.size);
 
                     readResult.BytesRead += size;
                 }
