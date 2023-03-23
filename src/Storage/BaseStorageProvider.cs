@@ -17,12 +17,7 @@ public static class StorageProviderDictionary
 
     public static void Register(string syncRootId, IStorageProvider storageProvider)
     {
-        if (_storageProviders.ContainsKey(syncRootId))
-        {
-            _storageProviders.Remove(syncRootId);
-        }
-
-        _storageProviders.Add(syncRootId, storageProvider);
+        _storageProviders[syncRootId] = storageProvider;
     }
 
     public static void Unregister(string syncRootId)
