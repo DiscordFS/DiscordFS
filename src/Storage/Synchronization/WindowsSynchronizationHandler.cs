@@ -1282,7 +1282,7 @@ public class WindowsSynchronizationHandler : IDisposable
         });
         openResult.ThrowOnFailure();
 
-        var readBytes = await fStream.ReadAsync(buffer, offset: 0, _fileSystemProvider.ChunkSize, ctx);
+        var readBytes = await fStream.ReadAsync(buffer.AsMemory(start: 0, _fileSystemProvider.ChunkSize), ctx);
         while (readBytes > 0)
         {
             ctx.ThrowIfCancellationRequested();
@@ -1293,7 +1293,7 @@ public class WindowsSynchronizationHandler : IDisposable
             writeResult.ThrowOnFailure();
 
             currentOffset += readBytes;
-            readBytes = await fStream.ReadAsync(buffer, offset: 0, _fileSystemProvider.ChunkSize, ctx);
+            readBytes = await fStream.ReadAsync(buffer.AsMemory(start: 0, _fileSystemProvider.ChunkSize), ctx);
         }
 
         var closeResult = await writeFileAsync.CloseAsync(ctx.IsCancellationRequested == false);
