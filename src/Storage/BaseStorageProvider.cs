@@ -120,6 +120,7 @@ public abstract class BaseStorageProvider<TOptions> : IStorageProvider<TOptions>
 
         StorageProviderDictionary.Register(syncRootId, this);
         StorageProviderSyncRootManager.Register(syncRootInfo);
+
         BeginSynchronization();
     }
 

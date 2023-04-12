@@ -60,7 +60,7 @@ public class DiscordGetFileListStream : IFileListStream
             throw new InvalidOperationException(message: "Not open");
         }
 
-        return Task.Run(GetNextFileResult() =>
+        return Task.Factory.StartNew(GetNextFileResult() =>
         {
             var getNextResult = new GetNextFileResult();
 

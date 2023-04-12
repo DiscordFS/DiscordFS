@@ -1,5 +1,4 @@
-﻿using System.Runtime.Intrinsics.Arm;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using Discord;
 using Discord.WebSocket;
@@ -164,52 +163,51 @@ public partial class MainPage
 
     private async void OnPageLoaded(object sender, EventArgs e)
     {
-        _configurationManager = Handler!.MauiContext!.Services.GetRequiredService<IAppConfigurationManager>();
-        _discordClient = (DiscordSocketClient)Handler.MauiContext.Services.GetRequiredService<IDiscordClient>();
-        _logger = Handler.MauiContext.Services.GetRequiredService<ILogger<MainPage>>();
-
-        AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+        try
         {
-            if (eventArgs.ExceptionObject is Exception exception)
+            _configurationManager = Handler!.MauiContext!.Services.GetRequiredService<IAppConfigurationManager>();
+            _discordClient = (DiscordSocketClient)Handler.MauiContext.Services.GetRequiredService<IDiscordClient>();
+            _logger = Handler.MauiContext.Services.GetRequiredService<ILogger<MainPage>>();
+
+            var config = await _configurationManager.GetConfigurationAsync();
+
+            var encryptionKey = await GetEncryptionKeyAsync(config);
+            var localPath = GetLocalPath(config);
+
+            if (config.Discord?.Enabled ?? false)
             {
-                _logger.LogCritical(exception, message: null);
+                _storageProvider = Handler!.MauiContext!.Services.GetRequiredService<IDiscordStorageProvider>();
+                var options = new DiscordStorageProviderOptions
+                {
+                    ProviderId = DiscordStorageProvider.ProviderId,
+                    ProviderVersion = DiscordStorageProvider.ProviderVersion,
+                    LocalPath = localPath,
+                    BotToken = await GetBotTokenAsync(config),
+                    GuildId = await GetGuildIdAsync(config),
+                    EncryptionKey = encryptionKey,
+                    DbChannelName = GetDbChannel(config),
+                    DataChannelName = GetDataChannel(config),
+                    UseCompression = config.UseCompression
+                };
+
+                try
+                {
+                    await _storageProvider.RegisterAsync(options);
+                }
+                catch (NotSupportedException)
+                {
+                    await OnAppNotSupported();
+                    return;
+                }
             }
-        };
 
-        var config = await _configurationManager.GetConfigurationAsync();
-
-        var encryptionKey = await GetEncryptionKeyAsync(config);
-        var localPath = GetLocalPath(config);
-
-        if (config.Discord?.Enabled ?? false)
-        {
-            _storageProvider = Handler!.MauiContext!.Services.GetRequiredService<IDiscordStorageProvider>();
-            var options = new DiscordStorageProviderOptions
-            {
-                ProviderId = DiscordStorageProvider.ProviderId,
-                ProviderVersion = DiscordStorageProvider.ProviderVersion,
-                LocalPath = localPath,
-                BotToken = await GetBotTokenAsync(config),
-                GuildId = await GetGuildIdAsync(config),
-                EncryptionKey = encryptionKey,
-                DbChannelName = GetDbChannel(config),
-                DataChannelName = GetDataChannel(config),
-                UseCompression = config.UseCompression
-            };
-
-            try
-            {
-                await _storageProvider.RegisterAsync(options);
-            }
-            catch (NotSupportedException)
-            {
-                await OnAppNotSupported();
-                return;
-            }
+            await _configurationManager.WriteConfigurationAsync();
+            OnAppIsReady();
         }
-
-        await _configurationManager.WriteConfigurationAsync();
-        OnAppIsReady();
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, message: "Startup failed");
+        }
     }
 
     private async Task ValidateDiscordTokenAndConnectAsync(string discordBotToken)
@@ -242,7 +240,7 @@ public partial class MainPage
         _storageProvider.Dispose();
         _ = Task.Factory.StartNew(async () =>
         {
-            await Task.Delay(millisecondsDelay: 5000);
+            await Task.Delay(millisecondsDelay: 3000);
             Application.Current?.Quit();
         });
     }

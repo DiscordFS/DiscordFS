@@ -1,6 +1,6 @@
 ﻿using System.Security.Cryptography;
+using DiscordFS.Helpers;
 using K4os.Compression.LZ4;
-
 using HashAlgorithm = DiscordFS.Helpers.HashAlgorithm;
 
 namespace DiscordFS.Storage.Synchronization;
@@ -73,7 +73,7 @@ public class FileChunk
 
         if (chunk.IsEncrypted)
         {
-            body = Decrypt(body, encryptionKey);
+            body = EncryptionHelper.Decrypt(body, encryptionKey);
         }
 
         if (chunk.IsCompressed)
@@ -130,7 +130,7 @@ public class FileChunk
 
         if (IsEncrypted)
         {
-            body = Encrypt(body, encryptionKey);
+            body = EncryptionHelper.Encrypt(body, encryptionKey);
         }
 
         bw.Write(originalSize);
@@ -166,48 +166,6 @@ public class FileChunk
         return result;
     }
 
-    private static byte[] Encrypt(byte[] body, byte[] encryptionKey)
-    {
-        using var aes = Aes.Create();
-        aes.Key = encryptionKey;
-        aes.Mode = CipherMode.CBC;
-        aes.GenerateIV();
-        var iv = aes.IV;
-
-        using var encryptor = aes.CreateEncryptor();
-        using var memoryStream = new MemoryStream();
-        using (var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write))
-            cryptoStream.Write(body, offset: 0, body.Length);
-
-        var encryptedBody = memoryStream.ToArray();
-        var encryptedBodyWithIv = new byte[iv.Length + encryptedBody.Length];
-        Buffer.BlockCopy(iv, srcOffset: 0, encryptedBodyWithIv, dstOffset: 0, iv.Length);
-        Buffer.BlockCopy(encryptedBody, srcOffset: 0, encryptedBodyWithIv, iv.Length, encryptedBody.Length);
-        return encryptedBodyWithIv;
-    }
-
-    private static byte[] Decrypt(byte[] body, byte[] encryptionKey)
-    {
-        using var aes = Aes.Create();
-        aes.Key = encryptionKey;
-        aes.Mode = CipherMode.CBC;
-
-
-        var iv = new byte[aes.BlockSize / 8];
-        Buffer.BlockCopy(body, srcOffset: 0, iv, dstOffset: 0, iv.Length);
-        aes.IV = iv;
-        var encryptedBody = new byte[body.Length - iv.Length];
-        Buffer.BlockCopy(body, iv.Length, encryptedBody, dstOffset: 0, encryptedBody.Length);
-
-        using var decryptor = aes.CreateDecryptor();
-        using var memoryStream = new MemoryStream();
-        using (var cryptoStream = new CryptoStream(memoryStream, decryptor, CryptoStreamMode.Write))
-            cryptoStream.Write(encryptedBody, offset: 0, encryptedBody.Length);
-
-        var decryptedBody = memoryStream.ToArray();
-        return decryptedBody;
-    }
-
     public static FileChunk CreateChunk(
         int chunkIndex,
         byte[] data,
@@ -225,6 +183,6 @@ public class FileChunk
             Index = chunkIndex,
             HashAlgorithm = HashAlgorithm.Md5,
             Hash = MD5.HashData(data)
-    };
+        };
     }
 }

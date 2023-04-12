@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
@@ -148,8 +147,15 @@ public class WindowsSynchronizationHandler : IDisposable
     {
         _ = Task.Factory.StartNew(async () =>
         {
-            await Task.Delay(millisecondsDelay: 5000);
-            _remoteChangesQueue.Post(e);
+            try
+            {
+                await Task.Delay(millisecondsDelay: 5000);
+                _remoteChangesQueue.Post(e);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, message: "OnRemoteFileChange failed");
+            }
         });
 
         return Task.CompletedTask;
@@ -175,9 +181,21 @@ public class WindowsSynchronizationHandler : IDisposable
         return Task.CompletedTask;
     }
 
-    private Task SyncAction(SyncDataParam data)
+    private async Task SyncAction(SyncDataParam data)
     {
-        return SyncDataAsyncRecursive(data.Folder, data.CancellationToken, data.SyncMode);
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            await SyncDataAsyncRecursive(data.Folder, data.CancellationToken, data.SyncMode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SyncDataAsyncRecursive failed for: " + data.Folder);
+        }
     }
 
     private async Task ProcessChangedDataAsync2(
@@ -196,6 +214,7 @@ public class WindowsSynchronizationHandler : IDisposable
             // Convert to placeholder if required
             if (!localPlaceHolder.ConvertToPlaceholder(markInSync: false))
             {
+                _logger.LogError("Convert to Placeholder failed: " + relativePath);
                 throw new Exception(message: "Convert to Placeholder failed");
             }
 
@@ -277,7 +296,15 @@ public class WindowsSynchronizationHandler : IDisposable
                     var remotePlaceHolder = await dynamicRemotePlaceHolder.GetPlaceholderAsync();
                     if (remotePlaceHolder == null || localPlaceHolder.LastWriteTime > remotePlaceHolder.LastWriteTime)
                     {
-                        await UploadFileAsync(fullPath, ctx);
+                        try
+                        {
+                            await UploadFileAsync(fullPath, ctx);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "File upload to server failed: " + relativePath);
+                        }
+
                         localPlaceHolder.Reload();
                     }
                     else
@@ -333,11 +360,8 @@ public class WindowsSynchronizationHandler : IDisposable
                 // TODO: Retry at a later time.
                 if (localPlaceHolder.PlaceholderInfoStandard.InSyncState == CF_IN_SYNC_STATE.CF_IN_SYNC_STATE_NOT_IN_SYNC)
                 {
-                    unchecked
-                    {
-                        throw new Win32Exception((int)CloudFilterNTStatus.STATUS_CLOUD_FILE_NOT_IN_SYNC,
-                            $"Not in sync after processing: {fullPath}");
-                    }
+                    Kernel32.SetLastError((uint)CloudFilterNTStatus.STATUS_CLOUD_FILE_NOT_IN_SYNC);
+                    _logger.LogWarning($"Not in sync after processing: {relativePath}");
                 }
             }
         }
@@ -476,14 +500,26 @@ public class WindowsSynchronizationHandler : IDisposable
         localPlaceHolder.HydratePlaceholder().ThrowOnFailure();
     }
 
-    private Task ChangedDataAction(ProcessChangedDataArgs data)
+    private async Task ChangedDataAction(ProcessChangedDataArgs data)
     {
-        return ProcessChangedDataAsync2(
-            data.FullPath,
-            data.LocalPlaceHolder,
-            data.RemotePlaceholder,
-            data.SyncMode,
-            CancellationToken.None);
+        if (_disposed)
+        {
+            return;
+        }
+
+        try
+        {
+            await ProcessChangedDataAsync2(
+                data.FullPath,
+                data.LocalPlaceHolder,
+                data.RemotePlaceholder,
+                data.SyncMode,
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ProcessChangedDataAsync2 failed for: " + data.FullPath);
+        }
     }
 
     private async Task LocalSyncTimerCallback()
@@ -610,23 +646,33 @@ public class WindowsSynchronizationHandler : IDisposable
     {
         EnsureNotDisposed();
 
-        var result = CfConnectSyncRoot(_options.LocalPath, _callbackMappings,
-            CallbackContext: 0,
-            CF_CONNECT_FLAGS.CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO |
-            CF_CONNECT_FLAGS.CF_CONNECT_FLAG_REQUIRE_FULL_FILE_PATH,
-            out var connectionKey);
-        result.ThrowIfFailed();
+        _ = Task.Factory.StartNew(() =>
+        {
+            try
+            {
+                var result = CfConnectSyncRoot(_options.LocalPath, _callbackMappings,
+                    CallbackContext: 0,
+                    CF_CONNECT_FLAGS.CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO |
+                    CF_CONNECT_FLAGS.CF_CONNECT_FLAG_REQUIRE_FULL_FILE_PATH,
+                    out var connectionKey);
+                result.ThrowIfFailed();
 
-        result = CfUpdateSyncProviderStatus(connectionKey, CF_SYNC_PROVIDER_STATUS.CF_PROVIDER_STATUS_IDLE);
-        State = StorageProviderState.InSync;
+                result = CfUpdateSyncProviderStatus(connectionKey, CF_SYNC_PROVIDER_STATUS.CF_PROVIDER_STATUS_IDLE);
+                State = StorageProviderState.InSync;
 
-        result.ThrowIfFailed();
+                result.ThrowIfFailed();
 
-        _logger.LogDebug(message: "CF Provider registered");
+                _logger.LogDebug(message: "CF Provider registered");
 
-        InitFileWatcher();
+                InitFileWatcher();
 
-        _connectionKey = connectionKey;
+                _connectionKey = connectionKey;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, message: "WindowsSychronizationHandler connect failed");
+            }
+        });
     }
 
     private async Task<FileOperationResult<List<FilePlaceholder>>> GetRemoteFileListAsync(
@@ -1079,9 +1125,9 @@ public class WindowsSynchronizationHandler : IDisposable
 
         if (offset + length == callbackparameters.FetchData.OptionalFileOffset)
         {
-            if (length < _fileSystemProvider.ChunkSize)
+            if (length < _fileSystemProvider.ChunkDataSize)
             {
-                length = Math.Min(_fileSystemProvider.ChunkSize, callbackparameters.FetchData.OptionalLength + length);
+                length = Math.Min(_fileSystemProvider.ChunkDataSize, callbackparameters.FetchData.OptionalLength + length);
             }
         }
 
@@ -1268,7 +1314,7 @@ public class WindowsSynchronizationHandler : IDisposable
 
         var localPlaceHolder = new FilePlaceholder(fullPath);
         var currentOffset = 0L;
-        var buffer = new byte[_fileSystemProvider.ChunkSize];
+        var buffer = new byte[_fileSystemProvider.ChunkDataSize];
 
         using var transferKey = new SafeTransferKey(fStream.SafeFileHandle);
 
@@ -1282,7 +1328,7 @@ public class WindowsSynchronizationHandler : IDisposable
         });
         openResult.ThrowOnFailure();
 
-        var readBytes = await fStream.ReadAsync(buffer.AsMemory(start: 0, _fileSystemProvider.ChunkSize), ctx);
+        var readBytes = await fStream.ReadAsync(buffer.AsMemory(start: 0, _fileSystemProvider.ChunkDataSize), ctx);
         while (readBytes > 0)
         {
             ctx.ThrowIfCancellationRequested();
@@ -1293,7 +1339,7 @@ public class WindowsSynchronizationHandler : IDisposable
             writeResult.ThrowOnFailure();
 
             currentOffset += readBytes;
-            readBytes = await fStream.ReadAsync(buffer.AsMemory(start: 0, _fileSystemProvider.ChunkSize), ctx);
+            readBytes = await fStream.ReadAsync(buffer.AsMemory(start: 0, _fileSystemProvider.ChunkDataSize), ctx);
         }
 
         var closeResult = await writeFileAsync.CloseAsync(ctx.IsCancellationRequested == false);
@@ -1328,20 +1374,28 @@ public class WindowsSynchronizationHandler : IDisposable
             return;
         }
 
-        if (e.ResyncSubDirectories)
+        try
         {
-            await SyncDataAsync(SyncMode.Full, e.Placeholder != null
-                ? e.Placeholder.RelativeFileName
-                : string.Empty);
-        }
-        else
-        {
-            var localFullPath = PathHelper.GetAbsolutePath(e.Placeholder.RelativeFileName, _options.LocalPath);
-            AddFileToRemoteChangeQueue(localFullPath, ignoreLock: false);
-        }
+            if (e.ResyncSubDirectories)
+            {
+                await SyncDataAsync(SyncMode.Full, e.Placeholder != null
+                    ? e.Placeholder.RelativeFileName
+                    : string.Empty);
+            }
+            else
+            {
+                var localFullPath = PathHelper.GetAbsolutePath(e.Placeholder.RelativeFileName, _options.LocalPath);
+                AddFileToRemoteChangeQueue(localFullPath, ignoreLock: false);
+            }
 
-        _fileSystemProvider.FileChange -= OnRemoteFileChange;
-        _fileSystemProvider.StateChange -= OnFileSystemProviderStateChange;
+            _fileSystemProvider.FileChange -= OnRemoteFileChange;
+            _fileSystemProvider.StateChange -= OnFileSystemProviderStateChange;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                "ProcessRemoteFileChangedAsync failed for: " + (e.Placeholder?.RelativeFileName ?? e.OldRelativePath ?? "root"));
+        }
     }
 
     private void AddFileToRemoteChangeQueue(string fullPath, bool ignoreLock)
@@ -1570,32 +1624,39 @@ public class WindowsSynchronizationHandler : IDisposable
     {
         return Task.Factory.StartNew(async () =>
                 {
-                    while (!_localChangedDataQueue.CancellationToken.IsCancellationRequested)
+                    try
                     {
-                        var item = await _localChangedDataQueue.WaitTakeNextAsync().ConfigureAwait(continueOnCapturedContext: false);
-
-                        if (_localChangedDataQueue.CancellationToken.IsCancellationRequested)
+                        while (!_localChangedDataQueue.CancellationToken.IsCancellationRequested)
                         {
-                            break;
-                        }
+                            var item = await _localChangedDataQueue.WaitTakeNextAsync().ConfigureAwait(continueOnCapturedContext: false);
 
-                        if (item != null)
-                        {
-                            var itemLock = _localChangedDataQueue.LockItemDisposable(item);
-                            try
+                            if (_localChangedDataQueue.CancellationToken.IsCancellationRequested)
                             {
-                                await ProcessFileChanged(item, SyncMode.Local);
+                                break;
                             }
-                            catch (Exception ex)
+
+                            if (item != null)
                             {
-                                _logger.LogError(ex, message: null);
-                            }
-                            finally
-                            {
-                                // Delay before releasing itemLock
-                                _ = Task.Delay(millisecondsDelay: 20).ContinueWith(_ => itemLock.Dispose());
+                                var itemLock = _localChangedDataQueue.LockItemDisposable(item);
+                                try
+                                {
+                                    await ProcessFileChanged(item, SyncMode.Local);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, message: null);
+                                }
+                                finally
+                                {
+                                    // Delay before releasing itemLock
+                                    _ = Task.Delay(millisecondsDelay: 20).ContinueWith(_ => itemLock.Dispose());
+                                }
                             }
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, message: "CreateLocalChangedDataQueueTask exception");
                     }
                 }, _localChangedDataQueue.CancellationToken, TaskCreationOptions.LongRunning |
                                                              TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.Default)
@@ -1606,33 +1667,40 @@ public class WindowsSynchronizationHandler : IDisposable
     {
         return Task.Factory.StartNew(async () =>
                 {
-                    while (!_remoteChangedDataQueue.CancellationToken.IsCancellationRequested)
+                    try
                     {
-                        var item = await _remoteChangedDataQueue.WaitTakeNextAsync().ConfigureAwait(continueOnCapturedContext: false);
-
-                        if (_remoteChangedDataQueue.CancellationToken.IsCancellationRequested)
+                        while (!_remoteChangedDataQueue.CancellationToken.IsCancellationRequested)
                         {
-                            break;
-                        }
+                            var item = await _remoteChangedDataQueue.WaitTakeNextAsync().ConfigureAwait(continueOnCapturedContext: false);
 
-                        if (item != null)
-                        {
-                            var itemLock = _remoteChangedDataQueue.LockItemDisposable(item);
+                            if (_remoteChangedDataQueue.CancellationToken.IsCancellationRequested)
+                            {
+                                break;
+                            }
 
-                            try
+                            if (item != null)
                             {
-                                await ProcessFileChanged(item, SyncMode.Full);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, message: null);
-                            }
-                            finally
-                            {
-                                // Delay before releasing itemLock
-                                _ = Task.Delay(millisecondsDelay: 20).ContinueWith(_ => itemLock.Dispose());
+                                var itemLock = _remoteChangedDataQueue.LockItemDisposable(item);
+
+                                try
+                                {
+                                    await ProcessFileChanged(item, SyncMode.Full);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, message: null);
+                                }
+                                finally
+                                {
+                                    // Delay before releasing itemLock
+                                    _ = Task.Delay(millisecondsDelay: 20).ContinueWith(_ => itemLock.Dispose());
+                                }
                             }
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, message: "CreateRemoteChangedDataQueueTask failed");
                     }
                 }, _remoteChangedDataQueue.CancellationToken, TaskCreationOptions.LongRunning |
                                                               TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.Default)
@@ -1683,59 +1751,65 @@ public class WindowsSynchronizationHandler : IDisposable
             return;
         }
 
-        NTStatus status;
-
-        if (_fileSystemProvider.Status != FileSystemProviderStatus.Ready)
+        try
         {
-            var value = new CF_OPERATION_PARAMETERS.ACKDELETE
+            NTStatus status;
+
+            if (_fileSystemProvider.Status != FileSystemProviderStatus.Ready)
+            {
+                var value = new CF_OPERATION_PARAMETERS.ACKDELETE
+                {
+                    Flags = CF_OPERATION_ACK_DELETE_FLAGS.CF_OPERATION_ACK_DELETE_FLAG_NONE,
+                    CompletionStatus = new NTStatus((uint)CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE)
+                };
+                var opParams1 = CF_OPERATION_PARAMETERS.Create(value);
+
+                CfExecuteWithLog(dat.OperationInfo, ref opParams1);
+                return;
+            }
+
+            var fullPath = PathHelper.GetAbsolutePath(dat.RelativePath, _options.LocalPath);
+            using var lockFile = _localChangedDataQueue.LockItemDisposable(fullPath);
+
+            if (FileExcluder.IsExcludedFile(dat.RelativePath))
+            {
+                status = NTStatus.STATUS_SUCCESS;
+                goto skip;
+            }
+
+            if (!(dat.IsDirectory
+                    ? Directory.Exists(fullPath)
+                    : File.Exists(fullPath)))
+            {
+                status = NTStatus.STATUS_SUCCESS;
+                goto skip;
+            }
+
+            var pl = new ExtendedPlaceholderState(fullPath);
+            if (pl.PlaceholderInfoStandard.PinState == CF_PIN_STATE.CF_PIN_STATE_EXCLUDED)
+            {
+                status = NTStatus.STATUS_SUCCESS;
+                goto skip;
+            }
+
+            var result = await _fileSystemProvider.Operations.DeleteFileAsync(dat.RelativePath, dat.IsDirectory);
+            status = new NTStatus((uint)result.Status);
+
+            skip:
+            var ackdelete = new CF_OPERATION_PARAMETERS.ACKDELETE
             {
                 Flags = CF_OPERATION_ACK_DELETE_FLAGS.CF_OPERATION_ACK_DELETE_FLAG_NONE,
-                CompletionStatus = new NTStatus((uint)CloudFilterNTStatus.STATUS_CLOUD_FILE_NETWORK_UNAVAILABLE)
+                CompletionStatus = status
             };
-            var opParams1 = CF_OPERATION_PARAMETERS.Create(value);
+            var opParams = CF_OPERATION_PARAMETERS.Create(ackdelete);
 
-            CfExecuteWithLog(dat.OperationInfo, ref opParams1);
-            return;
+            CfExecuteWithLog(dat.OperationInfo, ref opParams);
         }
-
-        var fullPath = PathHelper.GetAbsolutePath(dat.RelativePath, _options.LocalPath);
-        using var lockFile = _localChangedDataQueue.LockItemDisposable(fullPath);
-
-        if (FileExcluder.IsExcludedFile(dat.RelativePath))
+        catch (Exception ex)
         {
-            status = NTStatus.STATUS_SUCCESS;
-            goto skip;
+            _logger.LogError(ex, "NotifyDeleteAction failed for: " + dat.RelativePath);
         }
-
-        if (!(dat.IsDirectory
-                ? Directory.Exists(fullPath)
-                : File.Exists(fullPath)))
-        {
-            status = NTStatus.STATUS_SUCCESS;
-            goto skip;
-        }
-
-        var pl = new ExtendedPlaceholderState(fullPath);
-        if (pl.PlaceholderInfoStandard.PinState == CF_PIN_STATE.CF_PIN_STATE_EXCLUDED)
-        {
-            status = NTStatus.STATUS_SUCCESS;
-            goto skip;
-        }
-
-        var result = await _fileSystemProvider.Operations.DeleteFileAsync(dat.RelativePath, dat.IsDirectory);
-        status = new NTStatus((uint)result.Status);
-
-    skip:
-        var ackdelete = new CF_OPERATION_PARAMETERS.ACKDELETE
-        {
-            Flags = CF_OPERATION_ACK_DELETE_FLAGS.CF_OPERATION_ACK_DELETE_FLAG_NONE,
-            CompletionStatus = status
-        };
-        var opParams = CF_OPERATION_PARAMETERS.Create(ackdelete);
-
-        CfExecuteWithLog(dat.OperationInfo, ref opParams);
     }
-
 
     private void RemoveFileWatcher()
     {
@@ -1753,30 +1827,37 @@ public class WindowsSynchronizationHandler : IDisposable
     {
         _ = Task.Factory.StartNew(async () =>
                 {
-                    while (!_fileRangeManager.CancellationToken.IsCancellationRequested && !_disposed)
+                    try
                     {
-                        if (_disposed)
+                        while (!_fileRangeManager.CancellationToken.IsCancellationRequested && !_disposed)
                         {
-                            return;
-                        }
-
-                        var item = await _fileRangeManager.WaitTakeNextAsync().ConfigureAwait(continueOnCapturedContext: false);
-                        if (_fileRangeManager.CancellationToken.IsCancellationRequested)
-                        {
-                            break;
-                        }
-
-                        if (item != null)
-                        {
-                            try
+                            if (_disposed)
                             {
-                                await FetchDataAsync(item).ConfigureAwait(continueOnCapturedContext: false);
+                                return;
                             }
-                            catch (Exception ex)
+
+                            var item = await _fileRangeManager.WaitTakeNextAsync().ConfigureAwait(continueOnCapturedContext: false);
+                            if (_fileRangeManager.CancellationToken.IsCancellationRequested)
                             {
-                                _logger.LogError(ex, message: null);
+                                break;
+                            }
+
+                            if (item != null)
+                            {
+                                try
+                                {
+                                    await FetchDataAsync(item).ConfigureAwait(continueOnCapturedContext: false);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, message: null);
+                                }
                             }
                         }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, message: "StartFetchDataWorker failed");
                     }
                 }, _fileRangeManager.CancellationToken,
                 TaskCreationOptions.LongRunning | TaskCreationOptions.RunContinuationsAsynchronously,
@@ -1876,7 +1957,7 @@ public class WindowsSynchronizationHandler : IDisposable
                 }
 
                 var stackBuffer = new byte[StackSize];
-                var buffer = new byte[_fileSystemProvider.ChunkSize];
+                var buffer = new byte[_fileSystemProvider.ChunkDataSize];
 
                 var minRangeStart = long.MaxValue;
                 long totalRead = 0;
@@ -1889,7 +1970,7 @@ public class WindowsSynchronizationHandler : IDisposable
 
                     var currentOffset = currentRangeStart;
 
-                    var readLength = (int)Math.Min(currentRangeEnd - currentOffset, _fileSystemProvider.ChunkSize);
+                    var readLength = (int)Math.Min(currentRangeEnd - currentOffset, _fileSystemProvider.ChunkDataSize);
                     if (readLength > 0 && ctx.IsCancellationRequested == false)
                     {
                         var readResult = await fetchFile.ReadAsync(buffer, offsetBuffer: 0, currentOffset, readLength);

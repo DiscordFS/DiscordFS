@@ -1,5 +1,5 @@
 ﻿using System.Collections.Concurrent;
-using DiscordFS.Storage;
+using Serilog;
 
 namespace DiscordFS.Helpers;
 
@@ -137,14 +137,22 @@ public class LockableQueue<TItem> : IDisposable
 
             return Task.Run(async () =>
             {
-                await _autoResetEventAsync.WaitAsync(CancellationToken).ConfigureAwait(continueOnCapturedContext: false);
-
-                if (RestartDelay > 0)
+                try
                 {
-                    await Task.Delay(RestartDelay, CancellationToken);
-                }
+                    await _autoResetEventAsync.WaitAsync(CancellationToken).ConfigureAwait(continueOnCapturedContext: false);
 
-                return await WaitTakeNextAsync();
+                    if (RestartDelay > 0)
+                    {
+                        await Task.Delay(RestartDelay, CancellationToken);
+                    }
+
+                    return await WaitTakeNextAsync();
+                }
+                catch (Exception ex)
+                {
+                    Log.Logger.Error(ex, messageTemplate: "WaitTakeNextAsync exception");
+                    throw;
+                }
             }, CancellationToken);
         }
     }

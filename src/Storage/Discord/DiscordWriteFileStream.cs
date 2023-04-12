@@ -62,15 +62,22 @@ public class DiscordWriteFileStream : IWriteFileStream
         _params.CancellationToken.ThrowIfCancellationRequested();
 
         var chunkDataSize = chunk.Data.Length;
+        var serialized = chunk.Serialize(_discordFs.Options.EncryptionKey);
 
-        using var ms = new MemoryStream(chunk.Serialize(_discordFs.Options.EncryptionKey));
+        using var ms = new MemoryStream(serialized);
         ms.Seek(offset: 0, SeekOrigin.Begin);
 
         var fileName = Guid.NewGuid().ToString(format: "N");
         var attachment = new FileAttachment(ms, fileName);
 
+        if (serialized.Length > DiscordRemoteFileSystemProvider.MaxAttachmentSize)
+        {
+            throw new Exception(message: "Chunk size is too big");
+        }
+
         var message = await _discordFs.DataChannel.SendFileAsync(attachment,
-            options: DiscordHelper.CreateDefaultOptions(_params.CancellationToken));
+                options: DiscordHelper.CreateDefaultOptions(_params.CancellationToken))
+            .ConfigureAwait(continueOnCapturedContext: false);
 
         _chunks.AddRange(message.Attachments.Select(x => new IndexFileChunk
         {
@@ -101,13 +108,13 @@ public class DiscordWriteFileStream : IWriteFileStream
 
         try
         {
-            var maxAttachmentSize = _discordFs.ChunkSize;
+            var maxAttachmentSize = _discordFs.ChunkDataSize;
             var chunkCount = (int)Math.Ceiling((float)buffer.Length / maxAttachmentSize);
 
             foreach (var data in buffer.Chunk(maxAttachmentSize))
             {
                 var length = data.Length;
-                if (_chunkIndex == chunkCount - 1)
+                if (_chunkIndex == chunkCount - 1 && _chunkIndex > 0)
                 {
                     length = buffer.Length % maxAttachmentSize;
                 }

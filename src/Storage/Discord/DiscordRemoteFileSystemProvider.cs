@@ -5,6 +5,7 @@ using DiscordFS.Helpers;
 using DiscordFS.Platforms.Windows.Storage;
 using DiscordFS.Storage.FileSystem;
 using DiscordFS.Storage.FileSystem.Operations;
+using K4os.Compression.LZ4;
 using Microsoft.Extensions.Logging;
 using Index = DiscordFS.Storage.Synchronization.Index;
 
@@ -12,7 +13,9 @@ namespace DiscordFS.Storage.Discord;
 
 public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 {
-    private const string IndexFileName = "index.db";
+    public const int MaxAttachmentSize = 8 * 1024 * 1024;
+    private const string IndexFileName = "index";
+    private const string IndexFileExtension = "db";
 
     public Index LastKnownRemoteIndex { get; protected set; }
 
@@ -74,13 +77,20 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         _ = Task.Factory.StartNew(PerformFullSynchronizationAsync);
     }
 
-    private Task PerformFullSynchronizationAsync()
+    private async Task PerformFullSynchronizationAsync()
     {
-        return FileChange.InvokeAsync(this, new FileChangedEventArgs
+        try
         {
-            ChangeType = FileChangeEventType.All,
-            ResyncSubDirectories = true
-        });
+            await FileChange.InvokeAsync(this, new FileChangedEventArgs
+            {
+                ChangeType = FileChangeEventType.All,
+                ResyncSubDirectories = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, message: "PerformFullSynchronizationAsync failed");
+        }
     }
 
     public void Dispose()
@@ -104,9 +114,21 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
     public IRemoteFileOperations Operations { get; }
 
-    public int ChunkSize
+    private int _chunkDataSize;
+
+    public int ChunkDataSize
     {
-        get { return 8 * 1024 * 1024; }
+        get
+        {
+            if (_chunkDataSize > 0)
+            {
+                return _chunkDataSize;
+            }
+
+            // compression can result in larger files, so we need to account for that
+            var diff = LZ4Codec.MaximumOutputSize(MaxAttachmentSize) - MaxAttachmentSize;
+            return _chunkDataSize = MaxAttachmentSize - diff - 256; // leave 256 bytes for chunk info
+        }
     }
 
     public void Connect()
@@ -120,24 +142,31 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
         _cancellationTokenSource = new CancellationTokenSource();
 
-        _discordClient.MessageUpdated += OnMessageUpdated;
-        _discordClient.Connected += OnDiscordConnected;
-        _discordClient.Disconnected += OnDiscordDisconnected;
-
-        _ = Task.Run(ConnectAsync);
+        _ = Task.Factory.StartNew(ConnectAsync);
     }
 
     private async Task ConnectAsync()
     {
-        EnsureNotDisposed();
+        try
+        {
+            EnsureNotDisposed();
 
-        _guild = _discordClient.GetGuild(ulong.Parse(Options.GuildId));
-        DbChannel = await GetOrCreateChannelAsync(Options.DbChannelName);
-        DataChannel = await GetOrCreateChannelAsync(Options.DataChannelName);
+            _discordClient.MessageUpdated += OnMessageUpdated;
+            _discordClient.Connected += OnDiscordConnected;
+            _discordClient.Disconnected += OnDiscordDisconnected;
 
-        await FindIndexMessageAsync();
+            _guild = _discordClient.GetGuild(ulong.Parse(Options.GuildId));
+            DbChannel = await GetOrCreateChannelAsync(Options.DbChannelName);
+            DataChannel = await GetOrCreateChannelAsync(Options.DataChannelName);
 
-        _ = Task.Factory.StartNew(PerformInitialSynchronizationAsync);
+            await FindIndexMessageAsync();
+
+            _ = Task.Factory.StartNew(PerformInitialSynchronizationAsync);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, message: "ConnectAsync exception");
+        }
     }
 
     private async Task FindIndexMessageAsync()
@@ -207,7 +236,7 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         }
 
         return message.Author.Id == _guild.CurrentUser.Id &&
-               message.Attachments.Any(x => x.Filename.Equals(IndexFileName, StringComparison.OrdinalIgnoreCase));
+               message.Attachments.Any(x => x.Filename.Equals($"{IndexFileName}.{IndexFileExtension}", StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task OnDiscordConnected()
@@ -252,10 +281,10 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
 
     private async Task PerformInitialSynchronizationAsync()
     {
-        EnsureNotDisposed();
-
         try
         {
+            EnsureNotDisposed();
+
             if (_isReady)
             {
                 return;
@@ -284,24 +313,49 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         }
     }
 
+    private IEnumerable<FileAttachment> GetAttachmentsForIndex(Index indexFile)
+    {
+        var bytes = indexFile.Serialize();
+
+        var i = 0;
+        foreach (var chunk in bytes.Chunk(ChunkDataSize))
+        {
+            var data = chunk;
+
+            if (Options.EncryptionKey != null)
+            {
+                data = EncryptionHelper.Encrypt(chunk, Options.EncryptionKey);
+            }
+
+            var stream = new MemoryStream(data);
+            stream.Seek(offset: 0, SeekOrigin.Begin);
+
+            var fileName = $"{IndexFileName}{(i > 0 ? $"_{i}" : string.Empty)}.{IndexFileExtension}";
+            yield return new FileAttachment(stream, fileName);
+            i++;
+        }
+    }
+
     private async Task PostIndexMessageAsync(bool buildIndex = false)
     {
         var indexFile = buildIndex
             ? Index.BuildForDirectory(Options.LocalPath)
             : Index.GetEmptyIndex();
 
-        var bytes = indexFile.Serialize();
-
-        using var stream = new MemoryStream(bytes);
-        stream.Seek(offset: 0, SeekOrigin.Begin);
-
-        var message = await DbChannel.SendFileAsync(
+        var attachments = GetAttachmentsForIndex(indexFile).ToList();
+        var message = await DbChannel.SendFilesAsync(
             text: "**FILE DATABASE**\n"
                   + "\nDO NOT DELETE OR UNPIN THIS MESSAGE."
                   + "\nDO NOT POST ANY OTHER MESSAGES IN THIS CHANNEL.\n"
                   + "\nDoing this will corrupt data or affect performance.",
-            attachment: new FileAttachment(stream, IndexFileName),
+            attachments: attachments,
             options: DiscordHelper.CreateDefaultOptions(_cancellationTokenSource.Token));
+
+        foreach (var attachment in attachments)
+        {
+            await attachment.Stream.DisposeAsync();
+            attachment.Dispose();
+        }
 
         await Task.Delay(millisecondsDelay: 500);
         await message.PinAsync();
@@ -330,12 +384,23 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
     {
         EnsureNotDisposed();
 
-        var attachment = message.Attachments.First(x => x.Filename.Equals(IndexFileName, StringComparison.OrdinalIgnoreCase));
-        var client = HttpClientFactory.CreateClient(name: "DiscordFS");
-        var data = await client.GetByteArrayAsync(attachment.Url, _cancellationTokenSource.Token);
+        var chunks = new List<byte[]>(message.Attachments.Count);
+
+        foreach (var attachment in message.Attachments.OrderBy(x => x.Filename))
+        {
+            var client = HttpClientFactory.CreateClient(name: "DiscordFS");
+            var partData = await client.GetByteArrayAsync(attachment.Url, _cancellationTokenSource.Token);
+
+            if (Options.EncryptionKey != null)
+            {
+                partData = EncryptionHelper.Decrypt(partData, Options.EncryptionKey);
+            }
+
+            chunks.Add(partData);
+        }
 
         var fullSync = LastKnownRemoteIndex == null;
-        LastKnownRemoteIndex = Index.Deserialize(data);
+        LastKnownRemoteIndex = Index.Deserialize(chunks.SelectMany(x => x).ToArray());
 
         if (!fullSync)
         {
@@ -397,10 +462,6 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
             throw new InvalidOperationException(message: "Status is not ready");
         }
 
-        var bytes = index.Serialize();
-        using var stream = new MemoryStream(bytes);
-        stream.Seek(offset: 0, SeekOrigin.Begin);
-
         if (_indexMessageId == 0)
         {
             await FindIndexMessageAsync();
@@ -417,13 +478,17 @@ public class DiscordRemoteFileSystemProvider : IRemoteFileSystemProvider
         var message = (RestUserMessage)await DbChannel.GetMessageAsync(_indexMessageId,
             options: DiscordHelper.CreateDefaultOptions(_cancellationTokenSource.Token));
 
+        var attachments = GetAttachmentsForIndex(index);
         await message.ModifyAsync(props =>
         {
-            props.Attachments = new Optional<IEnumerable<FileAttachment>>(new[]
-            {
-                new FileAttachment(stream, IndexFileName)
-            });
+            props.Attachments = new Optional<IEnumerable<FileAttachment>>(attachments);
         });
+
+        foreach (var attachment in attachments)
+        {
+            await attachment.Stream.DisposeAsync();
+            attachment.Dispose();
+        }
 
         await Task.Delay(millisecondsDelay: 1500);
 

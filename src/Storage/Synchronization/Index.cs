@@ -141,6 +141,7 @@ public class Index
 
         Buffer.BlockCopy(sizeBytes, srcOffset: 0, result, dstOffset: 0, sizeBytes.Length);
         Buffer.BlockCopy(target, srcOffset: 0, result, offset, count);
+
         return result;
     }
 
