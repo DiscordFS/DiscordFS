@@ -169,18 +169,16 @@ public class DiscordWriteFileStream : IWriteFileStream
                 var relativePath = _params.RelativePath;
                 var fileInfo = _params.FileInfo;
 
-                var offset = TimeZoneInfo.Local.BaseUtcOffset;
-
                 var entry = index.CreateEmptyFile(relativePath, overwrite: true);
                 entry.Attributes = fileInfo.FileAttributes;
                 entry.CreationTime = fileInfo.CreationTime != default
-                    ? new DateTimeOffset(fileInfo.CreationTime, offset)
+                    ? new DateTimeOffset(fileInfo.CreationTime)
                     : DateTimeOffset.UtcNow;
                 entry.LastAccessTime = fileInfo.LastAccessTime != default
-                    ? new DateTimeOffset(fileInfo.LastAccessTime, offset)
+                    ? new DateTimeOffset(fileInfo.LastAccessTime)
                     : DateTimeOffset.UtcNow;
                 entry.LastModificationTime = fileInfo.LastWriteTime != default
-                    ? new DateTimeOffset(fileInfo.LastWriteTime, offset)
+                    ? new DateTimeOffset(fileInfo.LastWriteTime)
                     : DateTimeOffset.UtcNow;
                 entry.FileSize = fileInfo.FileSize;
                 entry.Chunks = _chunks;
